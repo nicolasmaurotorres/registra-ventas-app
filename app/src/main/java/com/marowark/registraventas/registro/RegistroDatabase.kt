@@ -198,4 +198,12 @@ interface VentaDao {
 
     @Query("SELECT * FROM venta") suspend fun lista(): List<VentaEntity>
     @Query("SELECT * FROM linea") suspend fun lineas(): List<LineaEntity>
+
+    /** Ventas no canceladas con Fecha de venta en [desde, hasta] (epoch days, inclusivos). */
+    @Transaction
+    @Query(
+        "SELECT venta.*, canal.nombre AS canalNombre FROM venta JOIN canal ON canal.id = venta.canalId " +
+            "WHERE NOT cancelada AND fechaVenta BETWEEN :desde AND :hasta",
+    )
+    fun vigentesEntre(desde: Long, hasta: Long): Flow<List<VentaConLineas>>
 }

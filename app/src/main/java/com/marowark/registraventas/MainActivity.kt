@@ -10,12 +10,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import com.marowark.registraventas.catalogo.CatalogoScreen
 import com.marowark.registraventas.ventas.EditarVentaScreen
+import com.marowark.registraventas.estadisticas.EstadisticasScreen
 import com.marowark.registraventas.ventas.RegistrarVentaScreen
 import com.marowark.registraventas.ventas.VentasCanceladasScreen
 import com.marowark.registraventas.ventas.VentasScreen
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -49,7 +48,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -127,7 +125,7 @@ private fun App() {
             composable<VentasRuta> { VentasScreen(nueva = { nav.navigate(RegistrarVentaRuta) }, editar = { nav.navigate(EditarVentaRuta(it)) }) }
             composable<RegistrarVentaRuta> { RegistrarVentaScreen(cerrar = { nav.popBackStack() }) }
             composable<EditarVentaRuta> { EditarVentaScreen(it.toRoute<EditarVentaRuta>().id, cerrar = { nav.popBackStack() }) }
-            composable<EstadisticasRuta> { Vacia("Estadísticas") }
+            composable<EstadisticasRuta> { EstadisticasScreen() }
             composable<CatalogoRuta> { CatalogoScreen() }
             composable<VentasCanceladasRuta> { VentasCanceladasScreen() }
         }
@@ -209,10 +207,4 @@ private fun MenuMas(opciones: List<Pair<String, () -> Unit>>) {
             DropdownMenuItem(text = { Text(titulo) }, onClick = { abierto = false; accion() })
         }
     }
-}
-
-// Placeholder hasta que cada ticket implemente su pestaña.
-@Composable
-private fun Vacia(titulo: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(titulo) }
 }
