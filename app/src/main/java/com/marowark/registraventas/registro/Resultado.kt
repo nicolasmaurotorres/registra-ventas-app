@@ -17,4 +17,5 @@ enum class Motivo(val mensaje: String) {
     TIENE_VENTAS("No se puede borrar: tiene Ventas. Desactivalo en su lugar"),
     ENTREGA_SIN_DESPACHO("No puede haber entrega sin despacho"),
     FECHAS_FUERA_DE_ORDEN("Las fechas deben ir en orden: venta, despacho, entrega"),
+    RESPALDO_INVALIDO("El archivo no es un respaldo válido"),
 }

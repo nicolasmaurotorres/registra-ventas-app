@@ -73,5 +73,171 @@ class RespaldoTest {
         assertEquals(linea.ultimaModificacion.toEpochMilli().toString(), l.texto("ultimaModificacion"))
     }
 
+    // --- Importar ---
+
+    private val otra = RegistroDePrueba(hoy = LocalDate.of(2026, 3, 10))
+    private val destino = otra.registro
+
+    @After fun cerrarOtra() = otra.cerrar()
+
+    @Test
+    fun exportar_e_importar_en_base_vacia_reproduce_todo() = runBlocking {
+        val agenda = registro.crearProducto("Agenda", 2500).valor()
+        registro.desactivarProducto(agenda.id)
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val feria = registro.crearCanal("Feria").valor()
+        val enMano = registro.canales().first().single { it.nombre == "En mano" }
+        val v1 = registro.registrarVenta(
+            DatosVenta(LocalDate.of(2026, 3, 1), feria.id, "Ana", listOf(DatosLinea(cuaderno.id, 2, 900), DatosLinea(agenda.id, 1, 2500)), 300, 50),
+        ).valor()
+        registro.despachar(v1.id, LocalDate.of(2026, 3, 2))
+        val v2 = registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 5), enMano.id, null, listOf(DatosLinea(cuaderno.id, 1, 1000)))).valor()
+        registro.cancelarVenta(v2.id)
+
+        val resumen = destino.importar(registro.exportar()).valor()
+
+        assertEquals(ResumenImportacion(productosAgregados = 2, productosActualizados = 0, canalesAgregados = 1, canalesActualizados = 0, ventasAgregadas = 2, ventasActualizadas = 0), resumen)
+        assertEquals(registro.productos().first(), destino.productos().first())
+        // Los Canales precargados se emparejan por nombre: quedan los ids locales.
+        val canalesDestino = destino.canales().first()
+        assertEquals(registro.canales().first().map { it.nombre }, canalesDestino.map { it.nombre })
+        val enManoDestino = canalesDestino.single { it.nombre == "En mano" }
+        assertEquals(registro.ventasVigentes().first(), destino.ventasVigentes().first())
+        assertEquals(registro.ventasCanceladas().first().map { it.copy(canalId = enManoDestino.id) }, destino.ventasCanceladas().first())
+    }
+
+    @Test
+    fun importar_un_respaldo_viejo_no_pierde_ventas_nuevas() = runBlocking {
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val canal = registro.canales().first().first().id
+        val vieja = registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 1), canal, null, listOf(DatosLinea(cuaderno.id, 1, 1000)))).valor()
+        val respaldo = registro.exportar()
+        prueba.reloj.avanzarDias(1)
+        val nueva = registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 11), canal, null, listOf(DatosLinea(cuaderno.id, 3, 1000)))).valor()
+
+        val resumen = registro.importar(respaldo).valor()
+
+        assertEquals(ResumenImportacion(0, 0, 0, 0, 0, 0), resumen)
+        assertEquals(listOf(nueva.id, vieja.id), registro.ventasVigentes().first().map { it.id })
+    }
+
+    @Test
+    fun conflicto_por_id_gana_la_ultima_modificacion_mas_reciente() = runBlocking {
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val canal = registro.canales().first().first().id
+        val venta = registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 1), canal, "Ana", listOf(DatosLinea(cuaderno.id, 1, 1000)))).valor()
+        destino.importar(registro.exportar()).valor()
+        // Origen cambia el Producto después; destino cambia la Venta todavía más tarde.
+        prueba.reloj.avanzarDias(1)
+        registro.editarProducto(cuaderno.id, "Cuaderno A5", 1200)
+        registro.despachar(venta.id, LocalDate.of(2026, 3, 2))
+        otra.reloj.avanzarDias(2)
+        destino.despachar(venta.id, LocalDate.of(2026, 3, 5))
+
+        val resumen = destino.importar(registro.exportar()).valor()
+
+        assertEquals(ResumenImportacion(0, 1, 0, 0, 0, 0), resumen)
+        assertEquals(listOf("Cuaderno A5" to 1200L), destino.productos().first().map { it.nombre to it.precioReferencia })
+        assertEquals(LocalDate.of(2026, 3, 5), destino.venta(venta.id)!!.fechaDespacho)
+    }
+
+    @Test
+    fun producto_y_canal_con_otro_id_y_mismo_nombre_se_emparejan_con_el_local() = runBlocking {
+        val origenCuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val origenFeria = registro.crearCanal("Feria").valor()
+        registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 1), origenFeria.id, null, listOf(DatosLinea(origenCuaderno.id, 2, 900)))).valor()
+        val respaldo = registro.exportar()
+        otra.reloj.avanzarDias(1) // el local es más nuevo: conserva sus datos
+        val cuaderno = destino.crearProducto("  CUADERNO ", 1500).valor()
+        val feria = destino.crearCanal("feria").valor()
+
+        val resumen = destino.importar(respaldo).valor()
+
+        assertEquals(ResumenImportacion(0, 0, 0, 0, 1, 0), resumen)
+        assertEquals(listOf(cuaderno), destino.productos().first())
+        assertEquals(feria, destino.canales().first().single { it.id == feria.id })
+        assertEquals(5, destino.canales().first().size)
+        val venta = destino.ventasVigentes().first().single()
+        assertEquals(feria.id, venta.canalId)
+        assertEquals("feria", venta.canalNombre)
+        assertEquals(listOf(cuaderno.id), venta.lineas.map { it.productoId })
+    }
+
+    @Test
+    fun emparejado_por_nombre_y_mas_nuevo_actualiza_el_local_sin_cambiar_su_id() = runBlocking {
+        val local = destino.crearProducto("cuaderno", 1500).valor()
+        prueba.reloj.avanzarDias(1)
+        registro.crearProducto("Cuaderno", 1000).valor()
+
+        val resumen = destino.importar(registro.exportar()).valor()
+
+        assertEquals(1, resumen.productosActualizados)
+        assertEquals(listOf(Triple(local.id, "Cuaderno", 1000L)), destino.productos().first().map { Triple(it.id, it.nombre, it.precioReferencia) })
+    }
+
+    @Test
+    fun la_cancelacion_viaja_en_ambos_sentidos() = runBlocking {
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val canal = registro.canales().first().first().id
+        val venta = registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 1), canal, null, listOf(DatosLinea(cuaderno.id, 1, 1000)))).valor()
+        destino.importar(registro.exportar()).valor()
+
+        prueba.reloj.avanzarDias(1)
+        registro.cancelarVenta(venta.id)
+        assertEquals(1, destino.importar(registro.exportar()).valor().ventasActualizadas)
+        assertEquals(listOf(venta.id), destino.ventasCanceladas().first().map { it.id })
+
+        prueba.reloj.avanzarDias(1)
+        registro.reactivarVenta(venta.id)
+        destino.importar(registro.exportar()).valor()
+        assertEquals(listOf(venta.id), destino.ventasVigentes().first().map { it.id })
+        assertEquals(emptyList<Venta>(), destino.ventasCanceladas().first())
+    }
+
+    @Test
+    fun las_lineas_viajan_con_su_venta() = runBlocking {
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val agenda = registro.crearProducto("Agenda", 2500).valor()
+        val canal = registro.canales().first().first().id
+        val venta = registro.registrarVenta(
+            DatosVenta(LocalDate.of(2026, 3, 1), canal, null, listOf(DatosLinea(cuaderno.id, 1, 1000), DatosLinea(agenda.id, 1, 2500))),
+        ).valor()
+        val conDos = registro.exportar()
+        // Se quita la Agenda: un respaldo viejo no debe traerla de vuelta.
+        prueba.reloj.avanzarDias(1)
+        val cuadernoLinea = venta.lineas.first { it.productoId == cuaderno.id }
+        registro.editarVenta(venta.id, DatosVenta(LocalDate.of(2026, 3, 1), canal, null, listOf(DatosLinea(cuaderno.id, 1, 1000, cuadernoLinea.id))))
+
+        registro.importar(conDos).valor()
+        assertEquals(listOf(cuaderno.id), registro.venta(venta.id)!!.lineas.map { it.productoId })
+
+        // Y si gana la importada, su set reemplaza al local.
+        destino.importar(conDos).valor()
+        destino.importar(registro.exportar()).valor()
+        assertEquals(listOf(cuadernoLinea.id), destino.venta(venta.id)!!.lineas.map { it.id })
+    }
+
+    @Test
+    fun un_archivo_invalido_no_modifica_nada() = runBlocking {
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val canal = registro.canales().first().first().id
+        registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 1), canal, null, listOf(DatosLinea(cuaderno.id, 1, 1000)))).valor()
+        val bueno = registro.exportar()
+        val antes = destino.exportar()
+
+        val invalidos = listOf(
+            "no es json",
+            bueno.substring(0, bueno.length / 2),
+            "{}",
+            bueno.replace("\"version\":1", "\"version\":99"),
+            bueno.replace("\"canalId\":\"$canal\"", "\"canalId\":\"inexistente\""),
+            bueno.replace("\"productoId\":\"${cuaderno.id}\"", "\"productoId\":\"inexistente\""),
+        )
+        for (json in invalidos) {
+            assertEquals(json, Resultado.Error(Motivo.RESPALDO_INVALIDO), destino.importar(json))
+            assertEquals(antes, destino.exportar())
+        }
+    }
+
     private fun kotlinx.serialization.json.JsonObject.texto(campo: String) = getValue(campo).jsonPrimitive.content
 }

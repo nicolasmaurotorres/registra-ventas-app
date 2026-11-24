@@ -258,6 +258,78 @@ class Registro(
         )
     }
 
+    /**
+     * Fusiona un respaldo sin borrar nada (ADR-0001), todo o nada. Producto/Canal: el gemelo local es el del
+     * mismo id o, si no hay, el del mismo nombre normalizado; si lo importado es más nuevo pisa sus campos pero
+     * conserva el id local, y las Ventas/Líneas importadas se reescriben para apuntar a él.
+     * Una Venta viaja con su set de Líneas: si gana la importada, sus Líneas reemplazan las locales; si no, se ignoran.
+     */
+    suspend fun importar(json: String): Resultado<ResumenImportacion> {
+        val r = leerRespaldo(json) ?: return Resultado.Error(Motivo.RESPALDO_INVALIDO)
+        return Resultado.Ok(
+            db.withTransaction {
+                val idProducto = mutableMapOf<String, String>()
+                var productosAgregados = 0
+                var productosActualizados = 0
+                for (p in r.productos) {
+                    val nuevo = p.copy(nombre = p.nombre.trim(), nombreNormalizado = normalizar(p.nombre))
+                    val local = productos.porId(p.id) ?: productos.idConNombre(nuevo.nombreNormalizado)?.let { productos.porId(it) }
+                    if (local == null) productos.guardar(nuevo).also { productosAgregados++ }
+                    else if (nuevo.ultimaModificacion > local.ultimaModificacion && libre(productos.idConNombre(nuevo.nombreNormalizado), local.id)) {
+                        productos.guardar(nuevo.copy(id = local.id)).also { productosActualizados++ }
+                    }
+                    idProducto[p.id] = local?.id ?: p.id
+                }
+                val idCanal = mutableMapOf<String, String>()
+                var canalesAgregados = 0
+                var canalesActualizados = 0
+                for (c in r.canales) {
+                    val nuevo = c.copy(nombre = c.nombre.trim(), nombreNormalizado = normalizar(c.nombre))
+                    val local = canales.porId(c.id) ?: canales.idConNombre(nuevo.nombreNormalizado)?.let { canales.porId(it) }
+                    if (local == null) canales.guardar(nuevo).also { canalesAgregados++ }
+                    else if (nuevo.ultimaModificacion > local.ultimaModificacion && libre(canales.idConNombre(nuevo.nombreNormalizado), local.id)) {
+                        canales.guardar(nuevo.copy(id = local.id)).also { canalesActualizados++ }
+                    }
+                    idCanal[c.id] = local?.id ?: c.id
+                }
+                val lineasPorVenta = r.lineas.groupBy { it.ventaId }
+                var ventasAgregadas = 0
+                var ventasActualizadas = 0
+                for (v in r.ventas) {
+                    val venta = v.copy(canalId = idCanal.getValue(v.canalId))
+                    val lineas = lineasPorVenta[v.id].orEmpty().map { it.copy(productoId = idProducto.getValue(it.productoId)) }
+                    val local = ventas.porId(v.id)?.venta
+                    if (local == null) ventas.guardarConLineas(venta, lineas).also { ventasAgregadas++ }
+                    else if (venta.ultimaModificacion > local.ultimaModificacion) ventas.reemplazarConLineas(venta, lineas).also { ventasActualizadas++ }
+                }
+                ResumenImportacion(productosAgregados, productosActualizados, canalesAgregados, canalesActualizados, ventasAgregadas, ventasActualizadas)
+            },
+        )
+    }
+
+    /** Un rename importado que choca con otro nombre local se descarta (gana el local) en vez de romper la unicidad. */
+    private fun libre(duenio: String?, id: String) = duenio == null || duenio == id
+
+    /** Respaldo completo validado (formato, version, nombres e ids únicos, referencias) o null. */
+    private fun leerRespaldo(json: String): Respaldo? {
+        val r = try {
+            Json.decodeFromString(Respaldo.serializer(), json)
+        } catch (e: IllegalArgumentException) { // SerializationException incluida
+            return null
+        }
+        fun unicos(valores: List<String>) = valores.toSet().size == valores.size
+        val productoIds = r.productos.map { it.id }.toSet()
+        val canalIds = r.canales.map { it.id }.toSet()
+        val ventaIds = r.ventas.map { it.id }.toSet()
+        val valido = r.version == VERSION_RESPALDO &&
+            r.productos.none { it.nombre.isBlank() } && r.canales.none { it.nombre.isBlank() } &&
+            unicos(r.productos.map { it.id }) && unicos(r.canales.map { it.id }) && unicos(r.ventas.map { it.id }) && unicos(r.lineas.map { it.id }) &&
+            unicos(r.productos.map { normalizar(it.nombre) }) && unicos(r.canales.map { normalizar(it.nombre) }) &&
+            r.ventas.all { it.canalId in canalIds } &&
+            r.lineas.all { it.ventaId in ventaIds && it.productoId in productoIds }
+        return r.takeIf { valido }
+    }
+
     /** [duenio]: id que ya usa ese nombre normalizado, si hay. */
     private fun nombreInvalido(id: String, limpio: String, duenio: String?): Motivo? = when {
         limpio.isEmpty() -> Motivo.NOMBRE_VACIO
@@ -265,6 +337,16 @@ class Registro(
         else -> null
     }
 }
+
+/** Lo que cambió al importar un respaldo, por tipo. */
+data class ResumenImportacion(
+    val productosAgregados: Int,
+    val productosActualizados: Int,
+    val canalesAgregados: Int,
+    val canalesActualizados: Int,
+    val ventasAgregadas: Int,
+    val ventasActualizadas: Int,
+)
 
 /** Clave de unicidad de nombres de Producto y Canal: sin espacios extremos ni mayúsculas. */
 internal fun normalizar(nombre: String) = nombre.trim().lowercase()

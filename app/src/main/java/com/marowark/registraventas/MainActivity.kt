@@ -22,7 +22,11 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.TextButton
+import com.marowark.registraventas.registro.Resultado
+import com.marowark.registraventas.ventas.Confirmar
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -91,10 +95,12 @@ private fun App() {
     val nav = rememberNavController()
     val entrada by nav.currentBackStackEntryAsState()
     val exportar = exportarRespaldo()
+    val importar = importarRespaldo()
     // Menú ⋮: agregar opciones acá (Exportar/Importar respaldo).
     val menu = listOf<Pair<String, () -> Unit>>(
         "Ventas canceladas" to { nav.navigate(VentasCanceladasRuta) { launchSingleTop = true } },
         "Exportar respaldo" to { exportar.launch("registra-ventas-${java.time.LocalDate.now()}.json") },
+        "Importar respaldo" to importar,
     )
     Scaffold(
         topBar = { TopAppBar(title = { Text("Registra Ventas") }, actions = { MenuMas(menu) }) },
@@ -148,6 +154,50 @@ private fun exportarRespaldo(): androidx.activity.result.ActivityResultLauncher<
             Toast.makeText(contexto, mensaje, Toast.LENGTH_LONG).show()
         }
     }
+}
+
+/** Confirma, deja elegir el archivo (SAF), fusiona con Registro.importar() y muestra el resumen. */
+@Composable
+private fun importarRespaldo(): () -> Unit {
+    val contexto = LocalContext.current
+    val alcance = rememberCoroutineScope()
+    var confirmando by remember { mutableStateOf(false) }
+    var resultado by remember { mutableStateOf<String?>(null) }
+    val abrir = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        alcance.launch {
+            resultado = try {
+                val json = withContext(Dispatchers.IO) {
+                    checkNotNull(contexto.contentResolver.openInputStream(uri)) { "No se pudo abrir el archivo" }.use { it.readBytes().decodeToString() }
+                }
+                when (val r = (contexto.applicationContext as RegistraVentasApp).registro.importar(json)) {
+                    is Resultado.Ok -> with(r.valor) {
+                        "Ventas: $ventasAgregadas agregadas, $ventasActualizadas actualizadas\n" +
+                            "Productos: $productosAgregados agregados, $productosActualizados actualizados\n" +
+                            "Canales: $canalesAgregados agregados, $canalesActualizados actualizados"
+                    }
+                    is Resultado.Error -> r.motivo.mensaje + ". No se modificó nada."
+                }
+            } catch (e: Exception) {
+                "No se pudo leer el respaldo: ${e.message}"
+            }
+        }
+    }
+    if (confirmando) {
+        Confirmar(
+            "¿Importar un respaldo? Se fusiona con tus datos sin borrar nada; si un registro está en ambos lados gana el modificado más recientemente.",
+            "Elegir archivo", confirmar = { abrir.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, cerrar = { confirmando = false },
+        )
+    }
+    resultado?.let {
+        AlertDialog(
+            onDismissRequest = { resultado = null },
+            title = { Text("Importar respaldo") },
+            text = { Text(it) },
+            confirmButton = { TextButton(onClick = { resultado = null }) { Text("Aceptar") } },
+        )
+    }
+    return { confirmando = true }
 }
 
 @Composable
