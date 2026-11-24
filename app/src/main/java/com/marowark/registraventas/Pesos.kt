@@ -13,7 +13,7 @@ fun formatearPesos(centavos: Long): String {
 /**
  * Texto ingresado → centavos, o null si no es un monto válido (≥ 0, hasta 2 decimales).
  * Acepta coma o punto decimal y separador de miles: "100.50", "100,5", "$1.234,50", "1,234.50".
- * Un único separador seguido de 3 dígitos se toma como miles ("1.234" = 1234).
+ * Un único separador seguido de 3 dígitos se toma como miles ("1.234" = 1234), salvo con parte entera 0 ("0.500" es inválido).
  */
 fun parsearPesos(texto: String): Long? {
     val s = texto.trim().removePrefix("$").trim()
@@ -29,7 +29,7 @@ fun parsearPesos(texto: String): Long? {
         else -> null
     }
     val enteroValido = Regex("\\d+").matches(entero) ||
-        miles != null && Regex("\\d{1,3}([$miles]\\d{3})+").matches(entero)
+        miles != null && Regex("[1-9]\\d{0,2}([$miles]\\d{3})+").matches(entero)
     if (!enteroValido) return null
     return entero.filter(Char::isDigit).toLongOrNull()?.times(100)?.plus(decimales.padEnd(2, '0').toLong())
 }

@@ -239,5 +239,63 @@ class RespaldoTest {
         }
     }
 
+    @Test
+    fun el_emparejado_no_depende_del_orden_del_archivo_nuevo_primero() = emparejadoIndependienteDelOrden(nuevoPrimero = true)
+
+    @Test
+    fun el_emparejado_no_depende_del_orden_del_archivo_renombrado_primero() = emparejadoIndependienteDelOrden(nuevoPrimero = false)
+
+    /** Local tiene "a"; el archivo trae ese mismo id renombrado a "b" (más nuevo) y otro id nuevo llamado "a". */
+    private fun emparejadoIndependienteDelOrden(nuevoPrimero: Boolean) = runBlocking {
+        val p1 = destino.crearProducto("a", 100).valor()
+        val c1 = destino.crearCanal("a").valor()
+        registro.importar(destino.exportar()).valor()
+        prueba.reloj.avanzarDias(1)
+        registro.editarProducto(p1.id, "b", 100)
+        registro.editarCanal(c1.id, "b")
+        val p2 = registro.crearProducto("a", 200).valor()
+        val c2 = registro.crearCanal("a").valor()
+        val venta = registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 1), c2.id, null, listOf(DatosLinea(p2.id, 1, 200)))).valor()
+        val r = Json.decodeFromString(Respaldo.serializer(), registro.exportar())
+        fun <T> ordenar(lista: List<T>, nuevo: (T) -> Boolean) = lista.sortedBy { if (nuevo(it) == nuevoPrimero) 0 else 1 }
+        val archivo = r.copy(productos = ordenar(r.productos) { it.id == p2.id }, canales = ordenar(r.canales) { it.id == c2.id })
+
+        destino.importar(Json.encodeToString(Respaldo.serializer(), archivo)).valor()
+
+        assertEquals(setOf(p1.id to "b", p2.id to "a"), destino.productos().first().map { it.id to it.nombre }.toSet())
+        assertEquals("b", destino.canales().first().single { it.id == c1.id }.nombre)
+        assertEquals("a", destino.canales().first().single { it.id == c2.id }.nombre)
+        val importada = destino.venta(venta.id)!!
+        assertEquals(c2.id, importada.canalId)
+        assertEquals(listOf(p2.id), importada.lineas.map { it.productoId })
+    }
+
+    @Test
+    fun ventas_que_rompen_las_reglas_no_se_importan() = runBlocking {
+        val cuaderno = registro.crearProducto("Cuaderno", 1000).valor()
+        val canal = registro.canales().first().first().id
+        registro.registrarVenta(DatosVenta(LocalDate.of(2026, 3, 5), canal, null, listOf(DatosLinea(cuaderno.id, 1, 1000)))).valor()
+        val r = Json.decodeFromString(Respaldo.serializer(), registro.exportar())
+        val v = r.ventas.single()
+        val dia = v.fechaVenta
+        val antes = destino.exportar()
+
+        val invalidos = listOf(
+            r.copy(lineas = emptyList()),
+            r.copy(lineas = r.lineas.map { it.copy(cantidad = 0) }),
+            r.copy(lineas = r.lineas.map { it.copy(precioCobrado = -1) }),
+            r.copy(ventas = listOf(v.copy(costoEnvio = -1))),
+            r.copy(ventas = listOf(v.copy(comision = -1))),
+            r.copy(ventas = listOf(v.copy(fechaEntrega = dia))),
+            r.copy(ventas = listOf(v.copy(fechaDespacho = dia - 1))),
+            r.copy(ventas = listOf(v.copy(fechaDespacho = dia + 2, fechaEntrega = dia + 1))),
+            r.copy(productos = r.productos.map { it.copy(precioReferencia = -1) }),
+        )
+        for (archivo in invalidos) {
+            assertEquals(archivo.toString(), Resultado.Error(Motivo.RESPALDO_INVALIDO), destino.importar(Json.encodeToString(Respaldo.serializer(), archivo)))
+            assertEquals(antes, destino.exportar())
+        }
+    }
+
     private fun kotlinx.serialization.json.JsonObject.texto(campo: String) = getValue(campo).jsonPrimitive.content
 }

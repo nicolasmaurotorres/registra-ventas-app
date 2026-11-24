@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import java.time.Clock
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -112,10 +113,10 @@ class Registro(
     suspend fun editarProducto(id: String, nombre: String, precioReferencia: Long): Resultado<Producto> =
         guardarProducto(id, nombre, precioReferencia, producto(id).activo)
 
-    suspend fun desactivarProducto(id: String) = activarProducto(id, false)
-    suspend fun reactivarProducto(id: String) = activarProducto(id, true)
+    suspend fun desactivarProducto(id: String) = cambiarActivoProducto(id, false)
+    suspend fun reactivarProducto(id: String) = cambiarActivoProducto(id, true)
 
-    private suspend fun activarProducto(id: String, activo: Boolean) =
+    private suspend fun cambiarActivoProducto(id: String, activo: Boolean) =
         productos.guardar(producto(id).copy(activo = activo, ultimaModificacion = ahora().toEpochMilli()))
 
     suspend fun borrarProducto(id: String): Resultado<Unit> {
@@ -128,7 +129,7 @@ class Registro(
 
     private suspend fun guardarProducto(id: String, nombre: String, precioReferencia: Long, activo: Boolean): Resultado<Producto> {
         val limpio = nombre.trim()
-        nombreInvalido(id, limpio, productos.idConNombre(normalizar(limpio)))?.let { return Resultado.Error(it) }
+        motivoNombreInvalido(id, limpio, productos.idConNombre(normalizar(limpio)))?.let { return Resultado.Error(it) }
         if (precioReferencia < 0) return Resultado.Error(Motivo.MONTO_NEGATIVO)
         val entidad = ProductoEntity(id, limpio, normalizar(limpio), precioReferencia, activo, ahora().toEpochMilli())
         productos.guardar(entidad)
@@ -143,10 +144,10 @@ class Registro(
     suspend fun crearCanal(nombre: String): Resultado<Canal> = guardarCanal(UUID.randomUUID().toString(), nombre, activo = true)
     suspend fun editarCanal(id: String, nombre: String): Resultado<Canal> = guardarCanal(id, nombre, canal(id).activo)
 
-    suspend fun desactivarCanal(id: String) = activarCanal(id, false)
-    suspend fun reactivarCanal(id: String) = activarCanal(id, true)
+    suspend fun desactivarCanal(id: String) = cambiarActivoCanal(id, false)
+    suspend fun reactivarCanal(id: String) = cambiarActivoCanal(id, true)
 
-    private suspend fun activarCanal(id: String, activo: Boolean) =
+    private suspend fun cambiarActivoCanal(id: String, activo: Boolean) =
         canales.guardar(canal(id).copy(activo = activo, ultimaModificacion = ahora().toEpochMilli()))
 
     suspend fun borrarCanal(id: String): Resultado<Unit> {
@@ -159,7 +160,7 @@ class Registro(
 
     private suspend fun guardarCanal(id: String, nombre: String, activo: Boolean): Resultado<Canal> {
         val limpio = nombre.trim()
-        nombreInvalido(id, limpio, canales.idConNombre(normalizar(limpio)))?.let { return Resultado.Error(it) }
+        motivoNombreInvalido(id, limpio, canales.idConNombre(normalizar(limpio)))?.let { return Resultado.Error(it) }
         val entidad = CanalEntity(id, limpio, normalizar(limpio), activo, ahora().toEpochMilli())
         canales.guardar(entidad)
         return Resultado.Ok(entidad.aCanal())
@@ -175,10 +176,7 @@ class Registro(
         validar(datos)?.let { return Resultado.Error(it) }
         val id = UUID.randomUUID().toString()
         val ahora = ahora().toEpochMilli()
-        val venta = VentaEntity(
-            id, datos.fechaVenta.toEpochDay(), datos.fechaDespacho?.toEpochDay(), datos.fechaEntrega?.toEpochDay(), datos.canalId!!,
-            datos.cliente?.trim()?.ifEmpty { null }, datos.costoEnvio, datos.comision, cancelada = false, ahora,
-        )
+        val venta = ventaEntity(id, datos, cancelada = false, ahora)
         val lineas = datos.lineas.map { LineaEntity(UUID.randomUUID().toString(), id, it.productoId, it.cantidad, it.precioCobrado, ahora) }
         ventas.guardarConLineas(venta, lineas)
         return Resultado.Ok(checkNotNull(ventas.porId(id)).aVenta())
@@ -193,6 +191,12 @@ class Registro(
         else -> ordenDeFechas(datos.fechaVenta, datos.fechaDespacho, datos.fechaEntrega)
     }
 
+    /** [datos] ya validados (canal elegido). */
+    private fun ventaEntity(id: String, datos: DatosVenta, cancelada: Boolean, ultimaModificacion: Long) = VentaEntity(
+        id, datos.fechaVenta.toEpochDay(), datos.fechaDespacho?.toEpochDay(), datos.fechaEntrega?.toEpochDay(), datos.canalId!!,
+        datos.cliente?.trim()?.ifEmpty { null }, datos.costoEnvio, datos.comision, cancelada, ultimaModificacion,
+    )
+
     /** Una Venta por id (vigente o cancelada), p. ej. para abrir su edición. */
     suspend fun venta(id: String): Venta? = ventas.porId(id)?.aVenta()
 
@@ -205,11 +209,7 @@ class Registro(
         val actual = checkNotNull(ventas.porId(id)) { "Venta inexistente: $id" }
         val previas = actual.lineas.associateBy { it.id }
         val ahora = ahora().toEpochMilli()
-        val venta = actual.venta.copy(
-            fechaVenta = datos.fechaVenta.toEpochDay(), fechaDespacho = datos.fechaDespacho?.toEpochDay(),
-            fechaEntrega = datos.fechaEntrega?.toEpochDay(), canalId = datos.canalId!!, cliente = datos.cliente?.trim()?.ifEmpty { null },
-            costoEnvio = datos.costoEnvio, comision = datos.comision, ultimaModificacion = ahora,
-        )
+        val venta = ventaEntity(id, datos, actual.venta.cancelada, ahora)
         val lineas = datos.lineas.map { d ->
             val previa = d.id?.let(previas::get)
             val nueva = LineaEntity(previa?.id ?: UUID.randomUUID().toString(), id, d.productoId, d.cantidad, d.precioCobrado, ahora)
@@ -266,69 +266,89 @@ class Registro(
      * Una Venta viaja con su set de Líneas: si gana la importada, sus Líneas reemplazan las locales; si no, se ignoran.
      */
     suspend fun importar(json: String): Resultado<ResumenImportacion> {
-        val r = leerRespaldo(json) ?: return Resultado.Error(Motivo.RESPALDO_INVALIDO)
+        val respaldo = leerRespaldo(json) ?: return Resultado.Error(Motivo.RESPALDO_INVALIDO)
         return Resultado.Ok(
             db.withTransaction {
-                val idProducto = mutableMapOf<String, String>()
-                var productosAgregados = 0
-                var productosActualizados = 0
-                for (p in r.productos) {
-                    val nuevo = p.copy(nombre = p.nombre.trim(), nombreNormalizado = normalizar(p.nombre))
-                    val local = productos.porId(p.id) ?: productos.idConNombre(nuevo.nombreNormalizado)?.let { productos.porId(it) }
-                    if (local == null) productos.guardar(nuevo).also { productosAgregados++ }
-                    else if (nuevo.ultimaModificacion > local.ultimaModificacion && libre(productos.idConNombre(nuevo.nombreNormalizado), local.id)) {
-                        productos.guardar(nuevo.copy(id = local.id)).also { productosActualizados++ }
-                    }
-                    idProducto[p.id] = local?.id ?: p.id
-                }
-                val idCanal = mutableMapOf<String, String>()
-                var canalesAgregados = 0
-                var canalesActualizados = 0
-                for (c in r.canales) {
-                    val nuevo = c.copy(nombre = c.nombre.trim(), nombreNormalizado = normalizar(c.nombre))
-                    val local = canales.porId(c.id) ?: canales.idConNombre(nuevo.nombreNormalizado)?.let { canales.porId(it) }
-                    if (local == null) canales.guardar(nuevo).also { canalesAgregados++ }
-                    else if (nuevo.ultimaModificacion > local.ultimaModificacion && libre(canales.idConNombre(nuevo.nombreNormalizado), local.id)) {
-                        canales.guardar(nuevo.copy(id = local.id)).also { canalesActualizados++ }
-                    }
-                    idCanal[c.id] = local?.id ?: c.id
-                }
-                val lineasPorVenta = r.lineas.groupBy { it.ventaId }
+                val p = fusionar(
+                    respaldo.productos.map { it.copy(nombre = it.nombre.trim(), nombreNormalizado = normalizar(it.nombre)) },
+                    productos::porId, productos::idConNombre, productos::guardar,
+                ) { copy(id = it) }
+                val c = fusionar(
+                    respaldo.canales.map { it.copy(nombre = it.nombre.trim(), nombreNormalizado = normalizar(it.nombre)) },
+                    canales::porId, canales::idConNombre, canales::guardar,
+                ) { copy(id = it) }
+                val lineasPorVenta = respaldo.lineas.groupBy { it.ventaId }
                 var ventasAgregadas = 0
                 var ventasActualizadas = 0
-                for (v in r.ventas) {
-                    val venta = v.copy(canalId = idCanal.getValue(v.canalId))
-                    val lineas = lineasPorVenta[v.id].orEmpty().map { it.copy(productoId = idProducto.getValue(it.productoId)) }
+                for (v in respaldo.ventas) {
+                    val venta = v.copy(canalId = c.idLocal.getValue(v.canalId))
+                    val lineas = lineasPorVenta[v.id].orEmpty().map { it.copy(productoId = p.idLocal.getValue(it.productoId)) }
                     val local = ventas.porId(v.id)?.venta
                     if (local == null) ventas.guardarConLineas(venta, lineas).also { ventasAgregadas++ }
                     else if (venta.ultimaModificacion > local.ultimaModificacion) ventas.reemplazarConLineas(venta, lineas).also { ventasActualizadas++ }
                 }
-                ResumenImportacion(productosAgregados, productosActualizados, canalesAgregados, canalesActualizados, ventasAgregadas, ventasActualizadas)
+                ResumenImportacion(p.agregados, p.actualizados, c.agregados, c.actualizados, ventasAgregadas, ventasActualizadas)
             },
         )
     }
 
-    /** Un rename importado que choca con otro nombre local se descarta (gana el local) en vez de romper la unicidad. */
-    private fun libre(duenio: String?, id: String) = duenio == null || duenio == id
+    private class Fusion(val idLocal: Map<String, String>, val agregados: Int, val actualizados: Int)
 
-    /** Respaldo completo validado (formato, version, nombres e ids únicos, referencias) o null. */
+    /**
+     * Fusiona Productos o Canales importados (nombre ya normalizado). Primero los que tienen gemelo por id (pueden
+     * renombrarse) y después el resto por nombre contra los nombres ya fusionados, así el orden del archivo no importa.
+     * Un rename importado que choca con otro nombre local se descarta (gana el local) en vez de romper la unicidad.
+     */
+    private suspend fun <T : ElementoCatalogo> fusionar(
+        importados: List<T>,
+        porId: suspend (String) -> T?,
+        idConNombre: suspend (String) -> String?,
+        guardar: suspend (T) -> Unit,
+        conId: T.(String) -> T,
+    ): Fusion {
+        val idLocal = mutableMapOf<String, String>()
+        var agregados = 0
+        var actualizados = 0
+        suspend fun fusionarUno(nuevo: T, local: T?) {
+            val duenioDelNombre = idConNombre(nuevo.nombreNormalizado)
+            if (local == null) guardar(nuevo).also { agregados++ }
+            else if (nuevo.ultimaModificacion > local.ultimaModificacion && (duenioDelNombre == null || duenioDelNombre == local.id)) {
+                guardar(nuevo.conId(local.id)).also { actualizados++ }
+            }
+            idLocal[nuevo.id] = local?.id ?: nuevo.id
+        }
+        val (conGemeloPorId, resto) = importados.partition { porId(it.id) != null }
+        for (nuevo in conGemeloPorId) fusionarUno(nuevo, porId(nuevo.id))
+        for (nuevo in resto) fusionarUno(nuevo, idConNombre(nuevo.nombreNormalizado)?.let { porId(it) })
+        return Fusion(idLocal, agregados, actualizados)
+    }
+
+    /** Respaldo completo validado (formato, version, nombres e ids únicos, referencias, reglas de Venta) o null. */
     private fun leerRespaldo(json: String): Respaldo? {
-        val r = try {
+        val respaldo = try {
             Json.decodeFromString(Respaldo.serializer(), json)
         } catch (e: IllegalArgumentException) { // SerializationException incluida
             return null
         }
         fun unicos(valores: List<String>) = valores.toSet().size == valores.size
-        val productoIds = r.productos.map { it.id }.toSet()
-        val canalIds = r.canales.map { it.id }.toSet()
-        val ventaIds = r.ventas.map { it.id }.toSet()
-        val valido = r.version == VERSION_RESPALDO &&
-            r.productos.none { it.nombre.isBlank() } && r.canales.none { it.nombre.isBlank() } &&
-            unicos(r.productos.map { it.id }) && unicos(r.canales.map { it.id }) && unicos(r.ventas.map { it.id }) && unicos(r.lineas.map { it.id }) &&
-            unicos(r.productos.map { normalizar(it.nombre) }) && unicos(r.canales.map { normalizar(it.nombre) }) &&
-            r.ventas.all { it.canalId in canalIds } &&
-            r.lineas.all { it.ventaId in ventaIds && it.productoId in productoIds }
-        return r.takeIf { valido }
+        val productoIds = respaldo.productos.map { it.id }.toSet()
+        val canalIds = respaldo.canales.map { it.id }.toSet()
+        val ventaIds = respaldo.ventas.map { it.id }.toSet()
+        val lineasPorVenta = respaldo.lineas.groupBy { it.ventaId }
+        val ventasValidas = try {
+            respaldo.ventas.all { validar(it.aDatos(lineasPorVenta[it.id].orEmpty())) == null }
+        } catch (e: DateTimeException) { // epoch day fuera de rango
+            false
+        }
+        val valido = respaldo.version == VERSION_RESPALDO &&
+            respaldo.productos.none { it.nombre.isBlank() || it.precioReferencia < 0 } && respaldo.canales.none { it.nombre.isBlank() } &&
+            unicos(respaldo.productos.map { it.id }) && unicos(respaldo.canales.map { it.id }) && unicos(respaldo.ventas.map { it.id }) &&
+            unicos(respaldo.lineas.map { it.id }) &&
+            unicos(respaldo.productos.map { normalizar(it.nombre) }) && unicos(respaldo.canales.map { normalizar(it.nombre) }) &&
+            respaldo.ventas.all { it.canalId in canalIds } &&
+            respaldo.lineas.all { it.ventaId in ventaIds && it.productoId in productoIds } &&
+            ventasValidas
+        return respaldo.takeIf { valido }
     }
 
     // --- Estadísticas ---
@@ -340,7 +360,7 @@ class Registro(
     ) { vs, ps -> calcularEstadisticas(vs.map(VentaConLineas::aVenta), ps.associate { it.id to it.nombre }) }
 
     /** [duenio]: id que ya usa ese nombre normalizado, si hay. */
-    private fun nombreInvalido(id: String, limpio: String, duenio: String?): Motivo? = when {
+    private fun motivoNombreInvalido(id: String, limpio: String, duenio: String?): Motivo? = when {
         limpio.isEmpty() -> Motivo.NOMBRE_VACIO
         duenio != null && duenio != id -> Motivo.NOMBRE_DUPLICADO
         else -> null
@@ -366,6 +386,11 @@ private fun ProductoEntity.aProducto() =
 private fun CanalEntity.aCanal() = Canal(id, nombre, activo, Instant.ofEpochMilli(ultimaModificacion))
 
 private fun LineaEntity.aLinea() = Linea(id, productoId, cantidad, precioCobrado, Instant.ofEpochMilli(ultimaModificacion))
+
+private fun VentaEntity.aDatos(lineas: List<LineaEntity>) = DatosVenta(
+    LocalDate.ofEpochDay(fechaVenta), canalId, cliente, lineas.map { DatosLinea(it.productoId, it.cantidad, it.precioCobrado) },
+    costoEnvio, comision, fechaDespacho?.let(LocalDate::ofEpochDay), fechaEntrega?.let(LocalDate::ofEpochDay),
+)
 
 private fun VentaConLineas.aVenta() = with(venta) {
     Venta(

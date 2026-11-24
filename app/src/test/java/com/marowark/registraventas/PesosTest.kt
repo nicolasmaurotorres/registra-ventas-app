@@ -28,5 +28,6 @@ class PesosTest {
         assertEquals(null, parsearPesos("abc"))
         assertEquals(null, parsearPesos("1,234,5"))
         assertEquals(null, parsearPesos("-5"))
+        assertEquals(null, parsearPesos("0.500"))
     }
 }

@@ -91,7 +91,6 @@ fun EditarVentaScreen(id: String, cerrar: () -> Unit, vm: VentasViewModel = view
         productos = productos.filter { it.activo || it.id in usados },
         guardar = { datos, listo -> vm.editar(id, datos, listo) },
         cerrar = cerrar,
-        fechasDeEnvio = true,
     )
 }
 
@@ -114,7 +113,6 @@ fun VentaFormulario(
     productos: List<Producto>,
     guardar: (DatosVenta, listo: (String?) -> Unit) -> Unit,
     cerrar: () -> Unit,
-    fechasDeEnvio: Boolean = false,
 ) {
     var fecha by remember { mutableStateOf(inicial.fechaVenta) }
     var despacho by remember { mutableStateOf(inicial.fechaDespacho) }
@@ -137,10 +135,9 @@ fun VentaFormulario(
     ) {
         Text(titulo, style = MaterialTheme.typography.titleLarge)
         CampoFecha("Fecha de venta", fecha) { fecha = it }
-        if (fechasDeEnvio) {
-            CampoFechaOpcional("Fecha de despacho", despacho, fecha) { despacho = it }
-            CampoFechaOpcional("Fecha de entrega", entrega, despacho ?: fecha) { entrega = it }
-        }
+        // También al registrar: una entrega en mano carga las tres fechas de una vez.
+        CampoFechaOpcional("Fecha de despacho", despacho, fecha) { despacho = it }
+        CampoFechaOpcional("Fecha de entrega", entrega, despacho ?: fecha) { entrega = it }
         Selector("Canal", canales.map { it.id to it.nombre }, canalId) { canalId = it }
         OutlinedTextField(cliente, { cliente = it }, label = { Text("Cliente (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 

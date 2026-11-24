@@ -50,13 +50,13 @@ fun RoomDatabase.Builder<RegistroDatabase>.conPrecarga(reloj: Clock) = addCallba
 @Serializable
 @Entity(tableName = "producto", indices = [Index(value = ["nombreNormalizado"], unique = true)])
 data class ProductoEntity(
-    @PrimaryKey val id: String,
+    @PrimaryKey override val id: String,
     val nombre: String,
-    val nombreNormalizado: String,
+    override val nombreNormalizado: String,
     val precioReferencia: Long,
     val activo: Boolean,
-    val ultimaModificacion: Long,
-)
+    override val ultimaModificacion: Long,
+) : ElementoCatalogo
 
 @Dao
 interface ProductoDao {
@@ -84,12 +84,19 @@ interface ProductoDao {
 @Serializable
 @Entity(tableName = "canal", indices = [Index(value = ["nombreNormalizado"], unique = true)])
 data class CanalEntity(
-    @PrimaryKey val id: String,
+    @PrimaryKey override val id: String,
     val nombre: String,
-    val nombreNormalizado: String,
+    override val nombreNormalizado: String,
     val activo: Boolean,
-    val ultimaModificacion: Long,
-)
+    override val ultimaModificacion: Long,
+) : ElementoCatalogo
+
+/** Lo que Producto y Canal comparten para fusionarse al importar un respaldo. */
+interface ElementoCatalogo {
+    val id: String
+    val nombreNormalizado: String
+    val ultimaModificacion: Long
+}
 
 @Dao
 interface CanalDao {

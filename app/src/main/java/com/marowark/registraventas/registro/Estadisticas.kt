@@ -4,22 +4,32 @@ package com.marowark.registraventas.registro
 data class Estadisticas(
     val cantidadVentas: Int,
     val unidades: Int,
-    val monto: Long,
-    val costosEnvio: Long,
-    val comisiones: Long,
+    override val monto: Long,
+    override val costosEnvio: Long,
+    override val comisiones: Long,
     /** De mayor a menor Monto; incluye Productos inactivos. Sin Neto (no se prorratean costos). */
     val porProducto: List<FilaProducto>,
     /** De mayor a menor Monto. */
     val porCanal: List<FilaCanal>,
-) {
+) : ConNeto
+
+/** Neto = Monto − Costos de envío − Comisiones. */
+interface ConNeto {
+    val monto: Long
+    val costosEnvio: Long
+    val comisiones: Long
     val neto: Long get() = monto - costosEnvio - comisiones
 }
 
 data class FilaProducto(val productoId: String, val nombre: String, val unidades: Int, val monto: Long)
 
-data class FilaCanal(val canalId: String, val nombre: String, val monto: Long, val costosEnvio: Long, val comisiones: Long) {
-    val neto: Long get() = monto - costosEnvio - comisiones
-}
+data class FilaCanal(
+    val canalId: String,
+    val nombre: String,
+    override val monto: Long,
+    override val costosEnvio: Long,
+    override val comisiones: Long,
+) : ConNeto
 
 internal fun calcularEstadisticas(ventas: List<Venta>, nombresProducto: Map<String, String>): Estadisticas {
     val lineas = ventas.flatMap { it.lineas }

@@ -94,10 +94,11 @@ private fun App() {
     val entrada by nav.currentBackStackEntryAsState()
     val exportar = exportarRespaldo()
     val importar = importarRespaldo()
+    val registro = (LocalContext.current.applicationContext as RegistraVentasApp).registro
     // Menú ⋮: agregar opciones acá (Exportar/Importar respaldo).
     val menu = listOf<Pair<String, () -> Unit>>(
         "Ventas canceladas" to { nav.navigate(VentasCanceladasRuta) { launchSingleTop = true } },
-        "Exportar respaldo" to { exportar.launch("registra-ventas-${java.time.LocalDate.now()}.json") },
+        "Exportar respaldo" to { exportar.launch("registra-ventas-${registro.hoy()}.json") },
         "Importar respaldo" to importar,
     )
     Scaffold(
