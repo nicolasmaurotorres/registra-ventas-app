@@ -1,6 +1,7 @@
 package com.marowark.registraventas.ventas
 
 import android.app.Application
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -47,6 +51,10 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun registrar(datos: DatosVenta, listo: (String?) -> Unit) = ejecutar(listo) { registro.registrarVenta(datos) }
+
+    val canceladas = registro.ventasCanceladas().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun cancelar(id: String) = viewModelScope.launch { registro.cancelarVenta(id) }
+    fun reactivar(id: String) = viewModelScope.launch { registro.reactivarVenta(id) }
 }
 
 private val formatoFecha = DateTimeFormatter.ofPattern("dd/MM/yyyy")
@@ -56,10 +64,12 @@ fun formatearFecha(fecha: LocalDate): String = fecha.format(formatoFecha)
 @Composable
 fun VentasScreen(nueva: () -> Unit, vm: VentasViewModel = viewModel()) {
     val ventas by vm.ventas.collectAsStateWithLifecycle()
+    var aCancelar by remember { mutableStateOf<Venta?>(null) }
+    aCancelar?.let { v -> Confirmar("¿Cancelar esta Venta?", "Cancelar Venta", { vm.cancelar(v.id) }, { aCancelar = null }) }
     Box(Modifier.fillMaxSize()) {
         if (ventas.isEmpty()) Text("Todavía no hay Ventas", Modifier.align(Alignment.Center))
         LazyColumn(Modifier.fillMaxSize()) {
-            items(ventas, key = { it.id }) { VentaFila(it) }
+            items(ventas, key = { it.id }) { VentaFila(it, Modifier.combinedClickable(onClick = {}, onLongClick = { aCancelar = it })) }
         }
         FloatingActionButton(onClick = nueva, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
             Icon(Icons.Filled.Add, contentDescription = "Registrar Venta")
