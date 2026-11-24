@@ -1,8 +1,8 @@
 package com.marowark.registraventas.ventas
 
 import android.app.Application
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +36,7 @@ import com.marowark.registraventas.RegistraVentasApp
 import com.marowark.registraventas.formatearPesos
 import com.marowark.registraventas.registro.DatosVenta
 import com.marowark.registraventas.registro.EstadoEnvio
+import com.marowark.registraventas.registro.Producto
 import com.marowark.registraventas.registro.Resultado
 import com.marowark.registraventas.registro.Venta
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -71,6 +72,13 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
     fun entregar(id: String, fecha: LocalDate, listo: (String?) -> Unit) = ejecutar(listo) { registro.entregar(id, fecha) }
     fun quitarDespacho(id: String, listo: (String?) -> Unit) = ejecutar(listo) { registro.quitarDespacho(id) }
     fun quitarEntrega(id: String, listo: (String?) -> Unit) = ejecutar(listo) { registro.quitarEntrega(id) }
+    val canceladas = registro.ventasCanceladas().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun cancelar(id: String) = viewModelScope.launch { registro.cancelarVenta(id) }
+    fun reactivar(id: String) = viewModelScope.launch { registro.reactivarVenta(id) }
+
+    fun crearProducto(nombre: String, precio: Long, listo: (Resultado<Producto>) -> Unit) = viewModelScope.launch {
+        listo(registro.crearProducto(nombre, precio))
+    }
 }
 
 private val formatoFecha = DateTimeFormatter.ofPattern("dd/MM/yyyy")
@@ -82,6 +90,8 @@ fun VentasScreen(nueva: () -> Unit, vm: VentasViewModel = viewModel()) {
     val ventas by vm.ventas.collectAsStateWithLifecycle()
     val filtro by vm.filtro.collectAsStateWithLifecycle()
     var envio by remember { mutableStateOf<String?>(null) }
+    var aCancelar by remember { mutableStateOf<Venta?>(null) }
+    aCancelar?.let { v -> Confirmar("¿Cancelar esta Venta?", "Cancelar Venta", { vm.cancelar(v.id) }, { aCancelar = null }) }
     Box(Modifier.fillMaxSize()) {
         if (ventas.isEmpty()) Text("No hay Ventas", Modifier.align(Alignment.Center))
         Column(Modifier.fillMaxSize()) {
@@ -95,7 +105,9 @@ fun VentasScreen(nueva: () -> Unit, vm: VentasViewModel = viewModel()) {
                 }
             }
             LazyColumn(Modifier.fillMaxSize()) {
-                items(ventas, key = { it.id }) { VentaFila(it, Modifier.clickable { envio = it.id }) }
+                items(ventas, key = { it.id }) {
+                    VentaFila(it, Modifier.combinedClickable(onClick = { envio = it.id }, onLongClick = { aCancelar = it }))
+                }
             }
         }
         FloatingActionButton(onClick = nueva, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {

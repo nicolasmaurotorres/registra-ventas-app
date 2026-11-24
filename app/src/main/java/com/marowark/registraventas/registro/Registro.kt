@@ -187,6 +187,12 @@ class Registro(
         else -> null
     }
 
+    /** Ventas canceladas (⋮ → Ventas canceladas), más recientes primero. */
+    fun ventasCanceladas(): Flow<List<Venta>> = ventas.canceladas().map { it.map(VentaConLineas::aVenta) }
+
+    suspend fun cancelarVenta(id: String) = ventas.marcarCancelada(id, true, ahora().toEpochMilli())
+    suspend fun reactivarVenta(id: String) = ventas.marcarCancelada(id, false, ahora().toEpochMilli())
+
     // --- Despacho y entrega ---
 
     suspend fun despachar(id: String, fecha: LocalDate) = cambiarFechas(id) { it.copy(fechaDespacho = fecha.toEpochDay()) }
