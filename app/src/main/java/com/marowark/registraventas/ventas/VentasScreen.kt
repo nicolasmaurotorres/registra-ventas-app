@@ -72,6 +72,12 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
     fun entregar(id: String, fecha: LocalDate, listo: (String?) -> Unit) = ejecutar(listo) { registro.entregar(id, fecha) }
     fun quitarDespacho(id: String, listo: (String?) -> Unit) = ejecutar(listo) { registro.quitarDespacho(id) }
     fun quitarEntrega(id: String, listo: (String?) -> Unit) = ejecutar(listo) { registro.quitarEntrega(id) }
+
+    val canales = registro.canales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val productos = registro.productos().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    suspend fun venta(id: String) = registro.venta(id)
+    fun editar(id: String, datos: DatosVenta, listo: (String?) -> Unit) = ejecutar(listo) { registro.editarVenta(id, datos) }
+
     val canceladas = registro.ventasCanceladas().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     fun cancelar(id: String) = viewModelScope.launch { registro.cancelarVenta(id) }
     fun reactivar(id: String) = viewModelScope.launch { registro.reactivarVenta(id) }
@@ -84,9 +90,9 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
 private val formatoFecha = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 fun formatearFecha(fecha: LocalDate): String = fecha.format(formatoFecha)
 
-/** Pestaña Ventas: filtros por Estado de envío, lista de Ventas vigentes y botón + para registrar. */
+/** Pestaña Ventas: filtros por Estado de envío, lista de Ventas vigentes, botón + para registrar; toque abre envío/edición. */
 @Composable
-fun VentasScreen(nueva: () -> Unit, vm: VentasViewModel = viewModel()) {
+fun VentasScreen(nueva: () -> Unit, editar: (String) -> Unit, vm: VentasViewModel = viewModel()) {
     val ventas by vm.ventas.collectAsStateWithLifecycle()
     val filtro by vm.filtro.collectAsStateWithLifecycle()
     var envio by remember { mutableStateOf<String?>(null) }
@@ -114,7 +120,7 @@ fun VentasScreen(nueva: () -> Unit, vm: VentasViewModel = viewModel()) {
             Icon(Icons.Filled.Add, contentDescription = "Registrar Venta")
         }
     }
-    ventas.find { it.id == envio }?.let { EnvioDialogo(it, vm, cerrar = { envio = null }) }
+    ventas.find { it.id == envio }?.let { EnvioDialogo(it, vm, editar = { envio = null; editar(it.id) }, cerrar = { envio = null }) }
 }
 
 /** Una Venta de la lista: fecha, Canal, Cliente, Monto y Estado de envío. */
@@ -130,7 +136,7 @@ fun VentaFila(venta: Venta, modifier: Modifier = Modifier) {
 
 /** Despachar, entregar o quitar esas fechas de una Venta (fecha = hoy, editable). */
 @Composable
-private fun EnvioDialogo(venta: Venta, vm: VentasViewModel, cerrar: () -> Unit) {
+private fun EnvioDialogo(venta: Venta, vm: VentasViewModel, editar: () -> Unit, cerrar: () -> Unit) {
     var fecha by remember { mutableStateOf(vm.hoy()) }
     var error by remember { mutableStateOf<String?>(null) }
     val listo: (String?) -> Unit = { error = it; if (it == null) cerrar() }
@@ -153,8 +159,11 @@ private fun EnvioDialogo(venta: Venta, vm: VentasViewModel, cerrar: () -> Unit) 
             }
         },
         dismissButton = {
-            if (venta.estadoEnvio == EstadoEnvio.EN_CAMINO) TextButton(onClick = { vm.quitarDespacho(venta.id, listo) }) { Text("Quitar despacho") }
-            else TextButton(onClick = cerrar) { Text("Cerrar") }
+            Row {
+                TextButton(onClick = editar) { Text("Editar") }
+                if (venta.estadoEnvio == EstadoEnvio.EN_CAMINO) TextButton(onClick = { vm.quitarDespacho(venta.id, listo) }) { Text("Quitar despacho") }
+                else TextButton(onClick = cerrar) { Text("Cerrar") }
+            }
         },
     )
 }
