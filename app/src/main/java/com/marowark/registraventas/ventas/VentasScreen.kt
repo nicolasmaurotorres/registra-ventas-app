@@ -1,6 +1,7 @@
 package com.marowark.registraventas.ventas
 
 import android.app.Application
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -47,19 +48,24 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun registrar(datos: DatosVenta, listo: (String?) -> Unit) = ejecutar(listo) { registro.registrarVenta(datos) }
+
+    val canales = registro.canales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val productos = registro.productos().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    suspend fun venta(id: String) = registro.venta(id)
+    fun editar(id: String, datos: DatosVenta, listo: (String?) -> Unit) = ejecutar(listo) { registro.editarVenta(id, datos) }
 }
 
 private val formatoFecha = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 fun formatearFecha(fecha: LocalDate): String = fecha.format(formatoFecha)
 
-/** Pestaña Ventas: lista de Ventas vigentes y botón + para registrar. */
+/** Pestaña Ventas: lista de Ventas vigentes, botón + para registrar y toque en una Venta para editarla. */
 @Composable
-fun VentasScreen(nueva: () -> Unit, vm: VentasViewModel = viewModel()) {
+fun VentasScreen(nueva: () -> Unit, editar: (String) -> Unit, vm: VentasViewModel = viewModel()) {
     val ventas by vm.ventas.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize()) {
         if (ventas.isEmpty()) Text("Todavía no hay Ventas", Modifier.align(Alignment.Center))
         LazyColumn(Modifier.fillMaxSize()) {
-            items(ventas, key = { it.id }) { VentaFila(it) }
+            items(ventas, key = { it.id }) { VentaFila(it, Modifier.clickable { editar(it.id) }) }
         }
         FloatingActionButton(onClick = nueva, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
             Icon(Icons.Filled.Add, contentDescription = "Registrar Venta")

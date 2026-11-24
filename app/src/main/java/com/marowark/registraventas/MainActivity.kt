@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.marowark.registraventas.catalogo.CatalogoScreen
+import com.marowark.registraventas.ventas.EditarVentaScreen
 import com.marowark.registraventas.ventas.RegistrarVentaScreen
 import com.marowark.registraventas.ventas.VentasScreen
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -34,6 +35,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import kotlinx.serialization.Serializable
 import kotlin.reflect.KClass
 
@@ -41,6 +43,7 @@ import kotlin.reflect.KClass
 @Serializable object EstadisticasRuta
 @Serializable object CatalogoRuta
 @Serializable object RegistrarVentaRuta
+@Serializable data class EditarVentaRuta(val id: String)
 
 private data class Pestania(val ruta: Any, val clase: KClass<*>, val titulo: String, val icono: ImageVector)
 
@@ -87,8 +90,9 @@ private fun App() {
         },
     ) { padding ->
         NavHost(nav, startDestination = VentasRuta, modifier = Modifier.padding(padding)) {
-            composable<VentasRuta> { VentasScreen(nueva = { nav.navigate(RegistrarVentaRuta) }) }
+            composable<VentasRuta> { VentasScreen(nueva = { nav.navigate(RegistrarVentaRuta) }, editar = { nav.navigate(EditarVentaRuta(it)) }) }
             composable<RegistrarVentaRuta> { RegistrarVentaScreen(cerrar = { nav.popBackStack() }) }
+            composable<EditarVentaRuta> { EditarVentaScreen(it.toRoute<EditarVentaRuta>().id, cerrar = { nav.popBackStack() }) }
             composable<EstadisticasRuta> { Vacia("Estadísticas") }
             composable<CatalogoRuta> { CatalogoScreen() }
         }

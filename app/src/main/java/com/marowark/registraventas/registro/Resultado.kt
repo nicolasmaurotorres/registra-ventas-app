@@ -15,4 +15,6 @@ enum class Motivo(val mensaje: String) {
     SIN_LINEAS("Agregá al menos un Producto"),
     CANTIDAD_INVALIDA("La cantidad debe ser al menos 1"),
     TIENE_VENTAS("No se puede borrar: tiene Ventas. Desactivalo en su lugar"),
+    ENTREGA_SIN_DESPACHO("No puede haber Fecha de entrega sin Fecha de despacho"),
+    FECHAS_FUERA_DE_ORDEN("Las fechas deben ir en orden: venta ≤ despacho ≤ entrega"),
 }
