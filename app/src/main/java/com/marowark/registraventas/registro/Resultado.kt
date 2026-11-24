@@ -1,0 +1,14 @@
+package com.marowark.registraventas.registro
+
+/** Resultado de una operación de Registro: Ok o una regla violada con su Motivo (spec #1). */
+sealed interface Resultado<out T> {
+    data class Ok<T>(val valor: T) : Resultado<T>
+    data class Error(val motivo: Motivo) : Resultado<Nothing>
+}
+
+/** Reglas de dominio violadas. Cada ticket agrega las suyas; la UI muestra [mensaje]. */
+enum class Motivo(val mensaje: String) {
+    NOMBRE_VACIO("El nombre no puede estar vacío"),
+    NOMBRE_DUPLICADO("Ya existe uno con ese nombre"),
+    MONTO_NEGATIVO("Los montos no pueden ser negativos"),
+}

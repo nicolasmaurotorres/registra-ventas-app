@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.marowark.registraventas.catalogo.CatalogoScreen
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -85,7 +86,7 @@ private fun App() {
         NavHost(nav, startDestination = VentasRuta, modifier = Modifier.padding(padding)) {
             composable<VentasRuta> { Vacia("Ventas") }
             composable<EstadisticasRuta> { Vacia("Estadísticas") }
-            composable<CatalogoRuta> { Vacia("Catálogo") }
+            composable<CatalogoRuta> { CatalogoScreen() }
         }
     }
 }
