@@ -28,6 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.marowark.registraventas.RegistraVentasApp
 import com.marowark.registraventas.formatearPesos
 import com.marowark.registraventas.registro.DatosVenta
+import com.marowark.registraventas.registro.Producto
 import com.marowark.registraventas.registro.Resultado
 import com.marowark.registraventas.registro.Venta
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,6 +56,10 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
     val canceladas = registro.ventasCanceladas().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     fun cancelar(id: String) = viewModelScope.launch { registro.cancelarVenta(id) }
     fun reactivar(id: String) = viewModelScope.launch { registro.reactivarVenta(id) }
+
+    fun crearProducto(nombre: String, precio: Long, listo: (Resultado<Producto>) -> Unit) = viewModelScope.launch {
+        listo(registro.crearProducto(nombre, precio))
+    }
 }
 
 private val formatoFecha = DateTimeFormatter.ofPattern("dd/MM/yyyy")
