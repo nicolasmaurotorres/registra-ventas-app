@@ -19,13 +19,23 @@ El precio por unidad que realmente se cobró en una Línea; parte del Precio de 
 Nombre libre y opcional de quien compró; no es una entidad con ficha propia.
 _Avoid_: Comprador
 
+**Costo de envío**:
+Lo que el envío de una Venta le cuesta al emprendimiento; se resta de lo vendido. Es $0 cuando el envío está incluido o la entrega fue en mano.
+
+**Comisión**:
+Lo que la plataforma del Canal cobra por una Venta; se resta de lo vendido igual que el Costo de envío. Es $0 por defecto.
+
+**Canal**:
+La plataforma o lugar por donde se concretó una Venta (Mercado Libre, Facebook Marketplace, la tienda web, en mano). Cada Venta tiene exactamente uno.
+_Avoid_: Plataforma, origen
+
 **Venta cancelada**:
-Una Venta que se conserva en el registro pero no cuenta en las estadísticas (cancelación o devolución).
+Una Venta que se conserva aparte del listado normal y no cuenta en las estadísticas; se puede reactivar en cualquier momento.
 
 ## Catálogo
 
 **Producto**:
-Un artículo del catálogo, identificado por su nombre, con un Precio de referencia.
+Un artículo del catálogo con un Precio de referencia, identificado por su nombre, que es único (sin distinguir mayúsculas ni espacios). Cada variante que se quiera medir por separado es un Producto distinto.
 _Avoid_: Artículo, ítem
 
 **Precio de referencia**:
@@ -42,7 +52,10 @@ Una semana calendario (lunes a domingo), un mes o un año; las Ventas se asignan
 _Avoid_: Últimos N días
 
 **Monto**:
-Suma de cantidad × Precio cobrado de las Líneas, en pesos argentinos con centavos.
+Suma de cantidad × Precio cobrado de las Líneas, en pesos argentinos con centavos; es el valor bruto, antes de costos.
+
+**Neto**:
+Monto menos Costos de envío y Comisiones. Solo existe para Ventas, Canales o Períodos completos, nunca por Producto.
 
 ## Fechas y estados
 
