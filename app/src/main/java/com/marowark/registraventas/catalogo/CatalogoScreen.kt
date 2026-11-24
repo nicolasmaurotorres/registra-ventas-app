@@ -137,7 +137,7 @@ private fun Seccion(titulo: String, nuevo: () -> Unit) {
 
 /** Diálogo de alta/edición de Producto o Canal. [precioInicial] null oculta el precio (Canal). */
 @Composable
-private fun ElementoDialogo(
+internal fun ElementoDialogo(
     tipo: String,
     nuevo: Boolean,
     nombreInicial: String,

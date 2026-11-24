@@ -176,4 +176,14 @@ interface VentaDao {
         borrarLineasExcepto(venta.id, lineas.map { it.id })
         guardarConLineas(venta, lineas)
     }
+
+    @Transaction
+    @Query(
+        "SELECT venta.*, canal.nombre AS canalNombre FROM venta JOIN canal ON canal.id = venta.canalId " +
+            "WHERE cancelada ORDER BY fechaVenta DESC, venta.ultimaModificacion DESC",
+    )
+    fun canceladas(): Flow<List<VentaConLineas>>
+
+    @Query("UPDATE venta SET cancelada = :cancelada, ultimaModificacion = :ultimaModificacion WHERE id = :id")
+    suspend fun marcarCancelada(id: String, cancelada: Boolean, ultimaModificacion: Long)
 }

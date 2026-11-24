@@ -210,6 +210,12 @@ class Registro(
         return Resultado.Ok(checkNotNull(ventas.porId(id)).aVenta())
     }
 
+    /** Ventas canceladas (⋮ → Ventas canceladas), más recientes primero. */
+    fun ventasCanceladas(): Flow<List<Venta>> = ventas.canceladas().map { it.map(VentaConLineas::aVenta) }
+
+    suspend fun cancelarVenta(id: String) = ventas.marcarCancelada(id, true, ahora().toEpochMilli())
+    suspend fun reactivarVenta(id: String) = ventas.marcarCancelada(id, false, ahora().toEpochMilli())
+
     /** [duenio]: id que ya usa ese nombre normalizado, si hay. */
     private fun nombreInvalido(id: String, limpio: String, duenio: String?): Motivo? = when {
         limpio.isEmpty() -> Motivo.NOMBRE_VACIO

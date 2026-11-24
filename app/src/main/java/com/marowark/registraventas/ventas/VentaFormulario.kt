@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.marowark.registraventas.catalogo.ElementoDialogo
 import com.marowark.registraventas.formatearPesos
 import com.marowark.registraventas.parsearPesos
 import com.marowark.registraventas.registro.Canal
@@ -47,6 +48,7 @@ import com.marowark.registraventas.registro.DatosLinea
 import com.marowark.registraventas.registro.DatosVenta
 import com.marowark.registraventas.registro.Producto
 import com.marowark.registraventas.registro.Venta
+import com.marowark.registraventas.registro.Resultado
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -172,10 +174,27 @@ fun VentaFormulario(
 
 /** Una Línea: Producto (precarga el Precio cobrado con el Precio de referencia), cantidad y precio. */
 @Composable
-private fun LineaFila(linea: LineaForm, productos: List<Producto>, quitar: (() -> Unit)?) {
+private fun LineaFila(linea: LineaForm, productos: List<Producto>, quitar: (() -> Unit)?, vm: VentasViewModel = viewModel()) {
+    var creando by remember { mutableStateOf(false) }
+    if (creando) {
+        ElementoDialogo(
+            tipo = "Producto", nuevo = true, nombreInicial = "", activo = true, precioInicial = "",
+            guardar = { nombre, precio, listo ->
+                vm.crearProducto(nombre, precio!!) { r ->
+                    when (r) {
+                        is Resultado.Ok -> { linea.productoId = r.valor.id; linea.precio = formatearPesos(r.valor.precioReferencia); listo(null) }
+                        is Resultado.Error -> listo(r.motivo.mensaje)
+                    }
+                }
+            },
+            alternarActivo = {}, borrar = {}, cerrar = { creando = false },
+        )
+    }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row {
-            Selector("Producto", productos.map { it.id to it.nombre }, linea.productoId, Modifier.weight(1f)) { id ->
+            // Opción con id "" = "Nuevo Producto" (alta rápida).
+            Selector("Producto", productos.map { it.id to it.nombre } + ("" to "Nuevo Producto…"), linea.productoId, Modifier.weight(1f)) { id ->
+                if (id.isEmpty()) { creando = true; return@Selector }
                 linea.productoId = id
                 productos.firstOrNull { it.id == id }?.let { linea.precio = formatearPesos(it.precioReferencia) }
             }
