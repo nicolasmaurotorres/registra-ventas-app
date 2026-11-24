@@ -1,6 +1,7 @@
 package com.marowark.registraventas.registro
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.time.Clock
 import java.time.Instant
@@ -178,6 +179,14 @@ class Registro(
 
     suspend fun cancelarVenta(id: String) = ventas.marcarCancelada(id, true, ahora().toEpochMilli())
     suspend fun reactivarVenta(id: String) = ventas.marcarCancelada(id, false, ahora().toEpochMilli())
+
+    // --- Estadísticas ---
+
+    /** Ventas no canceladas cuya Fecha de venta cae en [periodo]. */
+    fun estadisticas(periodo: Periodo): Flow<Estadisticas> = combine(
+        ventas.vigentesEntre(periodo.inicio.toEpochDay(), periodo.fin.toEpochDay()),
+        productos.todos(),
+    ) { vs, ps -> calcularEstadisticas(vs.map(VentaConLineas::aVenta), ps.associate { it.id to it.nombre }) }
 
     /** [duenio]: id que ya usa ese nombre normalizado, si hay. */
     private fun nombreInvalido(id: String, limpio: String, duenio: String?): Motivo? = when {
