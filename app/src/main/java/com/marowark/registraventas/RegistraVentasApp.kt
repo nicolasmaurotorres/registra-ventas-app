@@ -7,6 +7,7 @@ import java.time.Clock
 
 class RegistraVentasApp : Application() {
     val registro: Registro by lazy {
-        Registro(RegistroDatabase.crear(this), Clock.systemDefaultZone())
+        val reloj = Clock.systemDefaultZone()
+        Registro(RegistroDatabase.crear(this, reloj), reloj)
     }
 }

@@ -15,7 +15,7 @@ class RegistroDePrueba(hoy: LocalDate = LocalDate.of(2026, 1, 1)) {
     private val db = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(),
         RegistroDatabase::class.java,
-    ).allowMainThreadQueries().build()
+    ).allowMainThreadQueries().conPrecarga(reloj).build()
     val registro = Registro(db, reloj)
 
     fun cerrar() = db.close()

@@ -16,6 +16,14 @@ data class Producto(
     val ultimaModificacion: Instant,
 )
 
+/** Canal de venta (p. ej. Mercado Libre). */
+data class Canal(
+    val id: String,
+    val nombre: String,
+    val activo: Boolean,
+    val ultimaModificacion: Instant,
+)
+
 /**
  * Fachada del dominio sobre Room: el único seam de test (ver spec #1).
  * Los ViewModels y los tests sólo hablan con esta clase.
@@ -25,6 +33,7 @@ class Registro(
     private val reloj: Clock,
 ) {
     private val productos = db.productos()
+    private val canales = db.canales()
 
     /** Fecha de hoy según el reloj inyectado (p. ej. Fecha de venta por defecto). */
     fun hoy(): LocalDate = LocalDate.now(reloj)
@@ -59,13 +68,48 @@ class Registro(
 
     private suspend fun guardarProducto(id: String, nombre: String, precioReferencia: Long, activo: Boolean): Resultado<Producto> {
         val limpio = nombre.trim()
-        if (limpio.isEmpty()) return Resultado.Error(Motivo.NOMBRE_VACIO)
+        nombreInvalido(id, limpio, productos.idConNombre(normalizar(limpio)))?.let { return Resultado.Error(it) }
         if (precioReferencia < 0) return Resultado.Error(Motivo.MONTO_NEGATIVO)
-        val duenio = productos.idConNombre(normalizar(limpio))
-        if (duenio != null && duenio != id) return Resultado.Error(Motivo.NOMBRE_DUPLICADO)
         val entidad = ProductoEntity(id, limpio, normalizar(limpio), precioReferencia, activo, ahora().toEpochMilli())
         productos.guardar(entidad)
         return Resultado.Ok(entidad.aProducto())
+    }
+
+    // --- Canales (mismas reglas que Productos; los precargados los crea RegistroDatabase) ---
+
+    fun canalesActivos(): Flow<List<Canal>> = canales.activos().map { it.map(CanalEntity::aCanal) }
+    fun canales(): Flow<List<Canal>> = canales.todos().map { it.map(CanalEntity::aCanal) }
+
+    suspend fun crearCanal(nombre: String): Resultado<Canal> = guardarCanal(UUID.randomUUID().toString(), nombre, activo = true)
+    suspend fun editarCanal(id: String, nombre: String): Resultado<Canal> = guardarCanal(id, nombre, canal(id).activo)
+
+    suspend fun desactivarCanal(id: String) = activarCanal(id, false)
+    suspend fun reactivarCanal(id: String) = activarCanal(id, true)
+
+    private suspend fun activarCanal(id: String, activo: Boolean) =
+        canales.guardar(canal(id).copy(activo = activo, ultimaModificacion = ahora().toEpochMilli()))
+
+    /** Siempre Ok mientras no existan Ventas; "Registrar Venta" agrega el rechazo si las tiene. */
+    suspend fun borrarCanal(id: String): Resultado<Unit> {
+        canales.borrar(id)
+        return Resultado.Ok(Unit)
+    }
+
+    private suspend fun canal(id: String) = checkNotNull(canales.porId(id)) { "Canal inexistente: $id" }
+
+    private suspend fun guardarCanal(id: String, nombre: String, activo: Boolean): Resultado<Canal> {
+        val limpio = nombre.trim()
+        nombreInvalido(id, limpio, canales.idConNombre(normalizar(limpio)))?.let { return Resultado.Error(it) }
+        val entidad = CanalEntity(id, limpio, normalizar(limpio), activo, ahora().toEpochMilli())
+        canales.guardar(entidad)
+        return Resultado.Ok(entidad.aCanal())
+    }
+
+    /** [duenio]: id que ya usa ese nombre normalizado, si hay. */
+    private fun nombreInvalido(id: String, limpio: String, duenio: String?): Motivo? = when {
+        limpio.isEmpty() -> Motivo.NOMBRE_VACIO
+        duenio != null && duenio != id -> Motivo.NOMBRE_DUPLICADO
+        else -> null
     }
 }
 
@@ -74,3 +118,5 @@ internal fun normalizar(nombre: String) = nombre.trim().lowercase()
 
 private fun ProductoEntity.aProducto() =
     Producto(id, nombre, precioReferencia, activo, Instant.ofEpochMilli(ultimaModificacion))
+
+private fun CanalEntity.aCanal() = Canal(id, nombre, activo, Instant.ofEpochMilli(ultimaModificacion))
