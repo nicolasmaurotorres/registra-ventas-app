@@ -51,6 +51,19 @@ data class Venta(
 ) {
     /** Σ cantidad × Precio cobrado. */
     val monto: Long get() = lineas.sumOf { it.cantidad * it.precioCobrado }
+
+    val estadoEnvio: EstadoEnvio get() = when {
+        fechaEntrega != null -> EstadoEnvio.ENTREGADA
+        fechaDespacho != null -> EstadoEnvio.EN_CAMINO
+        else -> EstadoEnvio.PENDIENTE_DE_DESPACHO
+    }
+}
+
+/** Derivado de las fechas de la Venta; no se persiste. */
+enum class EstadoEnvio(val nombre: String) {
+    PENDIENTE_DE_DESPACHO("Pendiente de despacho"),
+    EN_CAMINO("En camino"),
+    ENTREGADA("Entregada"),
 }
 
 /** Lo que se carga en el formulario de Venta (registrar o editar). [canalId] null = sin elegir. */
@@ -61,9 +74,12 @@ data class DatosVenta(
     val lineas: List<DatosLinea>,
     val costoEnvio: Long = 0,
     val comision: Long = 0,
+    val fechaDespacho: LocalDate? = null,
+    val fechaEntrega: LocalDate? = null,
 )
 
-data class DatosLinea(val productoId: String, val cantidad: Int, val precioCobrado: Long)
+/** [id]: Línea existente al editar (conserva su id); null = Línea nueva. */
+data class DatosLinea(val productoId: String, val cantidad: Int, val precioCobrado: Long, val id: String? = null)
 
 /**
  * Fachada del dominio sobre Room: el único seam de test (ver spec #1).
@@ -149,15 +165,16 @@ class Registro(
 
     // --- Ventas ---
 
-    /** Ventas no canceladas, más recientes primero. */
-    fun ventasVigentes(): Flow<List<Venta>> = ventas.vigentes().map { it.map(VentaConLineas::aVenta) }
+    /** Ventas no canceladas, más recientes primero; [estado] null = todas. */
+    fun ventasVigentes(estado: EstadoEnvio? = null): Flow<List<Venta>> =
+        ventas.vigentes().map { lista -> lista.map(VentaConLineas::aVenta).filter { estado == null || it.estadoEnvio == estado } }
 
     suspend fun registrarVenta(datos: DatosVenta): Resultado<Venta> {
         validar(datos)?.let { return Resultado.Error(it) }
         val id = UUID.randomUUID().toString()
         val ahora = ahora().toEpochMilli()
         val venta = VentaEntity(
-            id, datos.fechaVenta.toEpochDay(), fechaDespacho = null, fechaEntrega = null, datos.canalId!!,
+            id, datos.fechaVenta.toEpochDay(), datos.fechaDespacho?.toEpochDay(), datos.fechaEntrega?.toEpochDay(), datos.canalId!!,
             datos.cliente?.trim()?.ifEmpty { null }, datos.costoEnvio, datos.comision, cancelada = false, ahora,
         )
         val lineas = datos.lineas.map { LineaEntity(UUID.randomUUID().toString(), id, it.productoId, it.cantidad, it.precioCobrado, ahora) }
@@ -171,7 +188,33 @@ class Registro(
         datos.lineas.isEmpty() -> Motivo.SIN_LINEAS
         datos.lineas.any { it.cantidad < 1 } -> Motivo.CANTIDAD_INVALIDA
         datos.costoEnvio < 0 || datos.comision < 0 || datos.lineas.any { it.precioCobrado < 0 } -> Motivo.MONTO_NEGATIVO
-        else -> null
+        else -> ordenDeFechas(datos.fechaVenta, datos.fechaDespacho, datos.fechaEntrega)
+    }
+
+    /** Una Venta por id (vigente o cancelada), p. ej. para abrir su edición. */
+    suspend fun venta(id: String): Venta? = ventas.porId(id)?.aVenta()
+
+    /**
+     * Reemplaza todos los campos y Líneas de la Venta con las mismas reglas que registrar.
+     * Las Líneas con id conservan su id y sólo se re-marcan si cambiaron; las que faltan se borran.
+     */
+    suspend fun editarVenta(id: String, datos: DatosVenta): Resultado<Venta> {
+        validar(datos)?.let { return Resultado.Error(it) }
+        val actual = checkNotNull(ventas.porId(id)) { "Venta inexistente: $id" }
+        val previas = actual.lineas.associateBy { it.id }
+        val ahora = ahora().toEpochMilli()
+        val venta = actual.venta.copy(
+            fechaVenta = datos.fechaVenta.toEpochDay(), fechaDespacho = datos.fechaDespacho?.toEpochDay(),
+            fechaEntrega = datos.fechaEntrega?.toEpochDay(), canalId = datos.canalId!!, cliente = datos.cliente?.trim()?.ifEmpty { null },
+            costoEnvio = datos.costoEnvio, comision = datos.comision, ultimaModificacion = ahora,
+        )
+        val lineas = datos.lineas.map { d ->
+            val previa = d.id?.let(previas::get)
+            val nueva = LineaEntity(previa?.id ?: UUID.randomUUID().toString(), id, d.productoId, d.cantidad, d.precioCobrado, ahora)
+            if (previa != null && previa == nueva.copy(ultimaModificacion = previa.ultimaModificacion)) previa else nueva
+        }
+        ventas.reemplazarConLineas(venta, lineas)
+        return Resultado.Ok(checkNotNull(ventas.porId(id)).aVenta())
     }
 
     /** Ventas canceladas (⋮ → Ventas canceladas), más recientes primero. */
@@ -179,6 +222,30 @@ class Registro(
 
     suspend fun cancelarVenta(id: String) = ventas.marcarCancelada(id, true, ahora().toEpochMilli())
     suspend fun reactivarVenta(id: String) = ventas.marcarCancelada(id, false, ahora().toEpochMilli())
+
+    // --- Despacho y entrega ---
+
+    suspend fun despachar(id: String, fecha: LocalDate) = cambiarFechas(id) { it.copy(fechaDespacho = fecha.toEpochDay()) }
+    suspend fun entregar(id: String, fecha: LocalDate) = cambiarFechas(id) { it.copy(fechaEntrega = fecha.toEpochDay()) }
+    suspend fun quitarDespacho(id: String) = cambiarFechas(id) { it.copy(fechaDespacho = null) }
+    suspend fun quitarEntrega(id: String) = cambiarFechas(id) { it.copy(fechaEntrega = null) }
+
+    private suspend fun cambiarFechas(id: String, cambio: (VentaEntity) -> VentaEntity): Resultado<Venta> {
+        val nueva = cambio(checkNotNull(ventas.porId(id)) { "Venta inexistente: $id" }.venta)
+        ordenDeFechas(
+            LocalDate.ofEpochDay(nueva.fechaVenta), nueva.fechaDespacho?.let(LocalDate::ofEpochDay), nueva.fechaEntrega?.let(LocalDate::ofEpochDay),
+        )?.let { return Resultado.Error(it) }
+        ventas.guardar(nueva.copy(ultimaModificacion = ahora().toEpochMilli()))
+        return Resultado.Ok(checkNotNull(ventas.porId(id)).aVenta())
+    }
+
+    /** venta ≤ despacho ≤ entrega, y no hay entrega sin despacho. También para editar Venta (#7). */
+    internal fun ordenDeFechas(fechaVenta: LocalDate, fechaDespacho: LocalDate?, fechaEntrega: LocalDate?): Motivo? = when {
+        fechaEntrega != null && fechaDespacho == null -> Motivo.ENTREGA_SIN_DESPACHO
+        fechaDespacho != null && fechaDespacho < fechaVenta -> Motivo.FECHAS_FUERA_DE_ORDEN
+        fechaEntrega != null && fechaDespacho != null && fechaEntrega < fechaDespacho -> Motivo.FECHAS_FUERA_DE_ORDEN
+        else -> null
+    }
 
     // --- Estadísticas ---
 

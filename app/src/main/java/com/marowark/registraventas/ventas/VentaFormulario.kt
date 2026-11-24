@@ -1,6 +1,7 @@
 package com.marowark.registraventas.ventas
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -45,6 +47,7 @@ import com.marowark.registraventas.registro.Canal
 import com.marowark.registraventas.registro.DatosLinea
 import com.marowark.registraventas.registro.DatosVenta
 import com.marowark.registraventas.registro.Producto
+import com.marowark.registraventas.registro.Venta
 import com.marowark.registraventas.registro.Resultado
 import java.time.Instant
 import java.time.LocalDate
@@ -65,8 +68,35 @@ fun RegistrarVentaScreen(cerrar: () -> Unit, vm: VentasViewModel = viewModel()) 
     )
 }
 
-/** Línea en edición: textos tal como se tipean, se parsean al guardar. */
-private class LineaForm(productoId: String?, cantidad: String, precio: String) {
+/**
+ * Pantalla "Editar Venta": carga la Venta y ofrece Canales/Productos activos más los inactivos
+ * que la Venta ya usa, para que se sigan viendo seleccionados.
+ */
+@Composable
+fun EditarVentaScreen(id: String, cerrar: () -> Unit, vm: VentasViewModel = viewModel()) {
+    val venta by produceState<Venta?>(null, id) { value = vm.venta(id) }
+    val canales by vm.canales.collectAsStateWithLifecycle()
+    val productos by vm.productos.collectAsStateWithLifecycle()
+    val v = venta ?: return
+    val usados = v.lineas.map { it.productoId }.toSet()
+    VentaFormulario(
+        titulo = "Editar Venta",
+        inicial = remember(v) {
+            DatosVenta(
+                v.fechaVenta, v.canalId, v.cliente, v.lineas.map { DatosLinea(it.productoId, it.cantidad, it.precioCobrado, it.id) },
+                v.costoEnvio, v.comision, v.fechaDespacho, v.fechaEntrega,
+            )
+        },
+        canales = canales.filter { it.activo || it.id == v.canalId },
+        productos = productos.filter { it.activo || it.id in usados },
+        guardar = { datos, listo -> vm.editar(id, datos, listo) },
+        cerrar = cerrar,
+        fechasDeEnvio = true,
+    )
+}
+
+/** Línea en edición: textos tal como se tipean, se parsean al guardar. [id] null = Línea nueva. */
+private class LineaForm(productoId: String?, cantidad: String, precio: String, val id: String? = null) {
     var productoId by mutableStateOf(productoId)
     var cantidad by mutableStateOf(cantidad)
     var precio by mutableStateOf(precio)
@@ -84,13 +114,16 @@ fun VentaFormulario(
     productos: List<Producto>,
     guardar: (DatosVenta, listo: (String?) -> Unit) -> Unit,
     cerrar: () -> Unit,
+    fechasDeEnvio: Boolean = false,
 ) {
     var fecha by remember { mutableStateOf(inicial.fechaVenta) }
+    var despacho by remember { mutableStateOf(inicial.fechaDespacho) }
+    var entrega by remember { mutableStateOf(inicial.fechaEntrega) }
     var canalId by remember { mutableStateOf(inicial.canalId) }
     var cliente by remember { mutableStateOf(inicial.cliente.orEmpty()) }
     val lineas = remember {
         mutableStateListOf<LineaForm>().apply {
-            inicial.lineas.forEach { add(LineaForm(it.productoId, it.cantidad.toString(), formatearPesos(it.precioCobrado))) }
+            inicial.lineas.forEach { add(LineaForm(it.productoId, it.cantidad.toString(), formatearPesos(it.precioCobrado), it.id)) }
             if (isEmpty()) add(LineaForm(null, "1", ""))
         }
     }
@@ -104,6 +137,10 @@ fun VentaFormulario(
     ) {
         Text(titulo, style = MaterialTheme.typography.titleLarge)
         CampoFecha("Fecha de venta", fecha) { fecha = it }
+        if (fechasDeEnvio) {
+            CampoFechaOpcional("Fecha de despacho", despacho, fecha) { despacho = it }
+            CampoFechaOpcional("Fecha de entrega", entrega, despacho ?: fecha) { entrega = it }
+        }
         Selector("Canal", canales.map { it.id to it.nombre }, canalId) { canalId = it }
         OutlinedTextField(cliente, { cliente = it }, label = { Text("Cliente (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
@@ -123,11 +160,11 @@ fun VentaFormulario(
                 val datosLineas = lineas.map { l ->
                     val productoId = l.productoId ?: return@Button run { error = "Elegí un Producto en cada línea" }
                     val precio = parsearPesos(l.precio) ?: return@Button run { error = "Precio inválido" }
-                    DatosLinea(productoId, l.cantidad.trim().toIntOrNull() ?: 0, precio)
+                    DatosLinea(productoId, l.cantidad.trim().toIntOrNull() ?: 0, precio, l.id)
                 }
                 val costoEnvio = parsearPesos(envio) ?: return@Button run { error = "Costo de envío inválido" }
                 val costoComision = parsearPesos(comision) ?: return@Button run { error = "Comisión inválida" }
-                guardar(DatosVenta(fecha, canalId, cliente, datosLineas, costoEnvio, costoComision)) { e ->
+                guardar(DatosVenta(fecha, canalId, cliente, datosLineas, costoEnvio, costoComision, despacho, entrega)) { e ->
                     if (e == null) cerrar() else error = e
                 }
             }) { Text("Guardar") }
@@ -198,6 +235,19 @@ fun Selector(etiqueta: String, opciones: List<Pair<String, String>>, elegido: St
                 DropdownMenuItem(text = { Text(nombre) }, onClick = { elegir(id); abierto = false })
             }
         }
+    }
+}
+
+/** Fecha que puede faltar: botón para cargarla ([sugerida] por defecto) o la fecha con un botón para quitarla. */
+@Composable
+private fun CampoFechaOpcional(etiqueta: String, fecha: LocalDate?, sugerida: LocalDate, cambiar: (LocalDate?) -> Unit) {
+    if (fecha == null) {
+        OutlinedButton(onClick = { cambiar(sugerida) }, modifier = Modifier.fillMaxWidth()) { Text("Agregar $etiqueta") }
+        return
+    }
+    Row {
+        Box(Modifier.weight(1f)) { CampoFecha(etiqueta, fecha) { cambiar(it) } }
+        IconButton(onClick = { cambiar(null) }) { Icon(Icons.Filled.Close, contentDescription = "Quitar $etiqueta") }
     }
 }
 
