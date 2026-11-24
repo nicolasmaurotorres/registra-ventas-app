@@ -24,6 +24,46 @@ data class Canal(
     val ultimaModificacion: Instant,
 )
 
+/** Línea de una Venta. [precioCobrado] por unidad, en centavos. */
+data class Linea(
+    val id: String,
+    val productoId: String,
+    val cantidad: Int,
+    val precioCobrado: Long,
+    val ultimaModificacion: Instant,
+)
+
+/** Venta registrada. Montos en centavos; Estado de envío se deriva de las fechas. */
+data class Venta(
+    val id: String,
+    val fechaVenta: LocalDate,
+    val fechaDespacho: LocalDate?,
+    val fechaEntrega: LocalDate?,
+    val canalId: String,
+    val canalNombre: String,
+    val cliente: String?,
+    val lineas: List<Linea>,
+    val costoEnvio: Long,
+    val comision: Long,
+    val cancelada: Boolean,
+    val ultimaModificacion: Instant,
+) {
+    /** Σ cantidad × Precio cobrado. */
+    val monto: Long get() = lineas.sumOf { it.cantidad * it.precioCobrado }
+}
+
+/** Lo que se carga en el formulario de Venta (registrar o editar). [canalId] null = sin elegir. */
+data class DatosVenta(
+    val fechaVenta: LocalDate,
+    val canalId: String?,
+    val cliente: String?,
+    val lineas: List<DatosLinea>,
+    val costoEnvio: Long = 0,
+    val comision: Long = 0,
+)
+
+data class DatosLinea(val productoId: String, val cantidad: Int, val precioCobrado: Long)
+
 /**
  * Fachada del dominio sobre Room: el único seam de test (ver spec #1).
  * Los ViewModels y los tests sólo hablan con esta clase.
@@ -34,6 +74,7 @@ class Registro(
 ) {
     private val productos = db.productos()
     private val canales = db.canales()
+    private val ventas = db.ventas()
 
     /** Fecha de hoy según el reloj inyectado (p. ej. Fecha de venta por defecto). */
     fun hoy(): LocalDate = LocalDate.now(reloj)
@@ -58,8 +99,8 @@ class Registro(
     private suspend fun activarProducto(id: String, activo: Boolean) =
         productos.guardar(producto(id).copy(activo = activo, ultimaModificacion = ahora().toEpochMilli()))
 
-    /** Siempre Ok mientras no existan Ventas; "Registrar Venta" agrega el rechazo si las tiene. */
     suspend fun borrarProducto(id: String): Resultado<Unit> {
+        if (ventas.hayConProducto(id)) return Resultado.Error(Motivo.TIENE_VENTAS)
         productos.borrar(id)
         return Resultado.Ok(Unit)
     }
@@ -89,8 +130,8 @@ class Registro(
     private suspend fun activarCanal(id: String, activo: Boolean) =
         canales.guardar(canal(id).copy(activo = activo, ultimaModificacion = ahora().toEpochMilli()))
 
-    /** Siempre Ok mientras no existan Ventas; "Registrar Venta" agrega el rechazo si las tiene. */
     suspend fun borrarCanal(id: String): Resultado<Unit> {
+        if (ventas.hayConCanal(id)) return Resultado.Error(Motivo.TIENE_VENTAS)
         canales.borrar(id)
         return Resultado.Ok(Unit)
     }
@@ -103,6 +144,33 @@ class Registro(
         val entidad = CanalEntity(id, limpio, normalizar(limpio), activo, ahora().toEpochMilli())
         canales.guardar(entidad)
         return Resultado.Ok(entidad.aCanal())
+    }
+
+    // --- Ventas ---
+
+    /** Ventas no canceladas, más recientes primero. */
+    fun ventasVigentes(): Flow<List<Venta>> = ventas.vigentes().map { it.map(VentaConLineas::aVenta) }
+
+    suspend fun registrarVenta(datos: DatosVenta): Resultado<Venta> {
+        validar(datos)?.let { return Resultado.Error(it) }
+        val id = UUID.randomUUID().toString()
+        val ahora = ahora().toEpochMilli()
+        val venta = VentaEntity(
+            id, datos.fechaVenta.toEpochDay(), fechaDespacho = null, fechaEntrega = null, datos.canalId!!,
+            datos.cliente?.trim()?.ifEmpty { null }, datos.costoEnvio, datos.comision, cancelada = false, ahora,
+        )
+        val lineas = datos.lineas.map { LineaEntity(UUID.randomUUID().toString(), id, it.productoId, it.cantidad, it.precioCobrado, ahora) }
+        ventas.guardarConLineas(venta, lineas)
+        return Resultado.Ok(checkNotNull(ventas.porId(id)).aVenta())
+    }
+
+    /** Reglas del formulario de Venta, compartidas por registrar y editar. */
+    internal fun validar(datos: DatosVenta): Motivo? = when {
+        datos.canalId == null -> Motivo.SIN_CANAL
+        datos.lineas.isEmpty() -> Motivo.SIN_LINEAS
+        datos.lineas.any { it.cantidad < 1 } -> Motivo.CANTIDAD_INVALIDA
+        datos.costoEnvio < 0 || datos.comision < 0 || datos.lineas.any { it.precioCobrado < 0 } -> Motivo.MONTO_NEGATIVO
+        else -> null
     }
 
     /** [duenio]: id que ya usa ese nombre normalizado, si hay. */
@@ -120,3 +188,13 @@ private fun ProductoEntity.aProducto() =
     Producto(id, nombre, precioReferencia, activo, Instant.ofEpochMilli(ultimaModificacion))
 
 private fun CanalEntity.aCanal() = Canal(id, nombre, activo, Instant.ofEpochMilli(ultimaModificacion))
+
+private fun LineaEntity.aLinea() = Linea(id, productoId, cantidad, precioCobrado, Instant.ofEpochMilli(ultimaModificacion))
+
+private fun VentaConLineas.aVenta() = with(venta) {
+    Venta(
+        id, LocalDate.ofEpochDay(fechaVenta), fechaDespacho?.let(LocalDate::ofEpochDay), fechaEntrega?.let(LocalDate::ofEpochDay),
+        canalId, canalNombre, cliente, lineas.map { it.aLinea() }, costoEnvio, comision, cancelada,
+        Instant.ofEpochMilli(ultimaModificacion),
+    )
+}

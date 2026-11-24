@@ -2,13 +2,16 @@ package com.marowark.registraventas.registro
 
 import android.content.Context
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -16,10 +19,11 @@ import java.time.Clock
 import java.util.UUID
 
 // shortcut: sin migraciones ni schema exportado mientras la app no tenga datos reales; agregarlas antes de la primera instalación en uso.
-@Database(entities = [ProductoEntity::class, CanalEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ProductoEntity::class, CanalEntity::class, VentaEntity::class, LineaEntity::class], version = 1, exportSchema = false)
 abstract class RegistroDatabase : RoomDatabase() {
     abstract fun productos(): ProductoDao
     abstract fun canales(): CanalDao
+    abstract fun ventas(): VentaDao
 
     companion object {
         fun crear(context: Context, reloj: Clock): RegistroDatabase =
@@ -101,4 +105,65 @@ interface CanalDao {
 
     @Upsert
     suspend fun guardar(canal: CanalEntity)
+}
+
+/** Fechas en epoch days (LocalDate.toEpochDay). Despacho/entrega null mientras no ocurren. */
+@Entity(tableName = "venta", indices = [Index("canalId")])
+data class VentaEntity(
+    @PrimaryKey val id: String,
+    val fechaVenta: Long,
+    val fechaDespacho: Long?,
+    val fechaEntrega: Long?,
+    val canalId: String,
+    val cliente: String?,
+    val costoEnvio: Long,
+    val comision: Long,
+    val cancelada: Boolean,
+    val ultimaModificacion: Long,
+)
+
+@Entity(tableName = "linea", indices = [Index("ventaId"), Index("productoId")])
+data class LineaEntity(
+    @PrimaryKey val id: String,
+    val ventaId: String,
+    val productoId: String,
+    val cantidad: Int,
+    val precioCobrado: Long,
+    val ultimaModificacion: Long,
+)
+
+data class VentaConLineas(
+    @Embedded val venta: VentaEntity,
+    val canalNombre: String,
+    @Relation(parentColumn = "id", entityColumn = "ventaId") val lineas: List<LineaEntity>,
+)
+
+@Dao
+interface VentaDao {
+    @Transaction
+    @Query(
+        "SELECT venta.*, canal.nombre AS canalNombre FROM venta JOIN canal ON canal.id = venta.canalId " +
+            "WHERE NOT cancelada ORDER BY fechaVenta DESC, venta.ultimaModificacion DESC",
+    )
+    fun vigentes(): Flow<List<VentaConLineas>>
+
+    @Transaction
+    @Query("SELECT venta.*, canal.nombre AS canalNombre FROM venta JOIN canal ON canal.id = venta.canalId WHERE venta.id = :id")
+    suspend fun porId(id: String): VentaConLineas?
+
+    @Query("SELECT EXISTS(SELECT 1 FROM linea WHERE productoId = :productoId)")
+    suspend fun hayConProducto(productoId: String): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM venta WHERE canalId = :canalId)")
+    suspend fun hayConCanal(canalId: String): Boolean
+
+    @Upsert suspend fun guardar(venta: VentaEntity)
+    @Upsert suspend fun guardarLineas(lineas: List<LineaEntity>)
+
+    /** Venta y Líneas juntas o nada. */
+    @Transaction
+    suspend fun guardarConLineas(venta: VentaEntity, lineas: List<LineaEntity>) {
+        guardar(venta)
+        guardarLineas(lineas)
+    }
 }

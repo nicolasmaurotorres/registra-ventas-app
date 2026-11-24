@@ -11,4 +11,8 @@ enum class Motivo(val mensaje: String) {
     NOMBRE_VACIO("El nombre no puede estar vacío"),
     NOMBRE_DUPLICADO("Ya existe uno con ese nombre"),
     MONTO_NEGATIVO("Los montos no pueden ser negativos"),
+    SIN_CANAL("Elegí un Canal"),
+    SIN_LINEAS("Agregá al menos un Producto"),
+    CANTIDAD_INVALIDA("La cantidad debe ser al menos 1"),
+    TIENE_VENTAS("No se puede borrar: tiene Ventas. Desactivalo en su lugar"),
 }

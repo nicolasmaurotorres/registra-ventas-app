@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.marowark.registraventas.catalogo.CatalogoScreen
+import com.marowark.registraventas.ventas.RegistrarVentaScreen
+import com.marowark.registraventas.ventas.VentasScreen
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +40,7 @@ import kotlin.reflect.KClass
 @Serializable object VentasRuta
 @Serializable object EstadisticasRuta
 @Serializable object CatalogoRuta
+@Serializable object RegistrarVentaRuta
 
 private data class Pestania(val ruta: Any, val clase: KClass<*>, val titulo: String, val icono: ImageVector)
 
@@ -84,7 +87,8 @@ private fun App() {
         },
     ) { padding ->
         NavHost(nav, startDestination = VentasRuta, modifier = Modifier.padding(padding)) {
-            composable<VentasRuta> { Vacia("Ventas") }
+            composable<VentasRuta> { VentasScreen(nueva = { nav.navigate(RegistrarVentaRuta) }) }
+            composable<RegistrarVentaRuta> { RegistrarVentaScreen(cerrar = { nav.popBackStack() }) }
             composable<EstadisticasRuta> { Vacia("Estadísticas") }
             composable<CatalogoRuta> { CatalogoScreen() }
         }
