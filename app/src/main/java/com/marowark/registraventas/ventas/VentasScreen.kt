@@ -24,6 +24,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.marowark.registraventas.RegistraVentasApp
 import com.marowark.registraventas.formatearPesos
 import com.marowark.registraventas.registro.DatosVenta
+import com.marowark.registraventas.registro.Producto
 import com.marowark.registraventas.registro.Resultado
 import com.marowark.registraventas.registro.Venta
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,6 +48,10 @@ class VentasViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun registrar(datos: DatosVenta, listo: (String?) -> Unit) = ejecutar(listo) { registro.registrarVenta(datos) }
+
+    fun crearProducto(nombre: String, precio: Long, listo: (Resultado<Producto>) -> Unit) = viewModelScope.launch {
+        listo(registro.crearProducto(nombre, precio))
+    }
 }
 
 private val formatoFecha = DateTimeFormatter.ofPattern("dd/MM/yyyy")
