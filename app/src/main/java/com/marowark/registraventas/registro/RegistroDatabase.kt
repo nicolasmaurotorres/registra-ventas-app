@@ -176,6 +176,16 @@ interface VentaDao {
         guardarLineas(lineas)
     }
 
+    @Query("DELETE FROM linea WHERE ventaId = :ventaId AND id NOT IN (:conservar)")
+    suspend fun borrarLineasExcepto(ventaId: String, conservar: List<String>)
+
+    /** Edición: Venta y su nuevo set de Líneas (las que faltan se borran), juntas o nada. */
+    @Transaction
+    suspend fun reemplazarConLineas(venta: VentaEntity, lineas: List<LineaEntity>) {
+        borrarLineasExcepto(venta.id, lineas.map { it.id })
+        guardarConLineas(venta, lineas)
+    }
+
     @Transaction
     @Query(
         "SELECT venta.*, canal.nombre AS canalNombre FROM venta JOIN canal ON canal.id = venta.canalId " +
