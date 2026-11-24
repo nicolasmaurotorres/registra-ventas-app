@@ -15,6 +15,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 import java.time.Clock
 import java.util.UUID
 
@@ -46,6 +47,7 @@ fun RoomDatabase.Builder<RegistroDatabase>.conPrecarga(reloj: Clock) = addCallba
 })
 
 /** Ids UUID y última modificación en epoch millis (ADR-0001). Montos en centavos. */
+@Serializable
 @Entity(tableName = "producto", indices = [Index(value = ["nombreNormalizado"], unique = true)])
 data class ProductoEntity(
     @PrimaryKey val id: String,
@@ -75,8 +77,11 @@ interface ProductoDao {
 
     @Upsert
     suspend fun guardar(producto: ProductoEntity)
+
+    @Query("SELECT * FROM producto") suspend fun lista(): List<ProductoEntity>
 }
 
+@Serializable
 @Entity(tableName = "canal", indices = [Index(value = ["nombreNormalizado"], unique = true)])
 data class CanalEntity(
     @PrimaryKey val id: String,
@@ -105,9 +110,12 @@ interface CanalDao {
 
     @Upsert
     suspend fun guardar(canal: CanalEntity)
+
+    @Query("SELECT * FROM canal") suspend fun lista(): List<CanalEntity>
 }
 
 /** Fechas en epoch days (LocalDate.toEpochDay). Despacho/entrega null mientras no ocurren. */
+@Serializable
 @Entity(tableName = "venta", indices = [Index("canalId")])
 data class VentaEntity(
     @PrimaryKey val id: String,
@@ -122,6 +130,7 @@ data class VentaEntity(
     val ultimaModificacion: Long,
 )
 
+@Serializable
 @Entity(tableName = "linea", indices = [Index("ventaId"), Index("productoId")])
 data class LineaEntity(
     @PrimaryKey val id: String,
@@ -176,4 +185,7 @@ interface VentaDao {
 
     @Query("UPDATE venta SET cancelada = :cancelada, ultimaModificacion = :ultimaModificacion WHERE id = :id")
     suspend fun marcarCancelada(id: String, cancelada: Boolean, ultimaModificacion: Long)
+
+    @Query("SELECT * FROM venta") suspend fun lista(): List<VentaEntity>
+    @Query("SELECT * FROM linea") suspend fun lineas(): List<LineaEntity>
 }

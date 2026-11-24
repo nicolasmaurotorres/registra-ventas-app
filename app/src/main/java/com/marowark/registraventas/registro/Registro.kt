@@ -1,7 +1,9 @@
 package com.marowark.registraventas.registro
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -215,6 +217,16 @@ class Registro(
         fechaDespacho != null && fechaDespacho < fechaVenta -> Motivo.FECHAS_FUERA_DE_ORDEN
         fechaEntrega != null && fechaDespacho != null && fechaEntrega < fechaDespacho -> Motivo.FECHAS_FUERA_DE_ORDEN
         else -> null
+    }
+
+    // --- Respaldo ---
+
+    /** JSON con todo (incluye inactivos y canceladas), leído en una sola transacción. */
+    suspend fun exportar(): String = db.withTransaction {
+        Json.encodeToString(
+            Respaldo.serializer(),
+            Respaldo(VERSION_RESPALDO, productos.lista(), canales.lista(), ventas.lista(), ventas.lineas()),
+        )
     }
 
     /** [duenio]: id que ya usa ese nombre normalizado, si hay. */

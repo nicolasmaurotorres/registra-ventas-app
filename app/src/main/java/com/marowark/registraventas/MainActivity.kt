@@ -1,8 +1,12 @@
 package com.marowark.registraventas
 
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import com.marowark.registraventas.catalogo.CatalogoScreen
 import com.marowark.registraventas.ventas.RegistrarVentaScreen
@@ -34,6 +38,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,9 +87,11 @@ class MainActivity : ComponentActivity() {
 private fun App() {
     val nav = rememberNavController()
     val entrada by nav.currentBackStackEntryAsState()
+    val exportar = exportarRespaldo()
     // Menú ⋮: agregar opciones acá (Exportar/Importar respaldo).
     val menu = listOf<Pair<String, () -> Unit>>(
         "Ventas canceladas" to { nav.navigate(VentasCanceladasRuta) { launchSingleTop = true } },
+        "Exportar respaldo" to { exportar.launch("registra-ventas-${java.time.LocalDate.now()}.json") },
     )
     Scaffold(
         topBar = { TopAppBar(title = { Text("Registra Ventas") }, actions = { MenuMas(menu) }) },
@@ -109,6 +120,28 @@ private fun App() {
             composable<EstadisticasRuta> { Vacia("Estadísticas") }
             composable<CatalogoRuta> { CatalogoScreen() }
             composable<VentasCanceladasRuta> { VentasCanceladasScreen() }
+        }
+    }
+}
+
+/** SAF: el usuario elige dónde guardar; el JSON lo arma Registro.exportar(). */
+@Composable
+private fun exportarRespaldo(): androidx.activity.result.ActivityResultLauncher<String> {
+    val contexto = LocalContext.current
+    val alcance = rememberCoroutineScope()
+    return rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        alcance.launch {
+            val mensaje = try {
+                val json = (contexto.applicationContext as RegistraVentasApp).registro.exportar()
+                withContext(Dispatchers.IO) {
+                    checkNotNull(contexto.contentResolver.openOutputStream(uri, "wt")) { "No se pudo abrir el archivo" }.use { it.write(json.toByteArray()) }
+                }
+                "Respaldo guardado"
+            } catch (e: Exception) {
+                "No se pudo guardar el respaldo: ${e.message}"
+            }
+            Toast.makeText(contexto, mensaje, Toast.LENGTH_LONG).show()
         }
     }
 }
